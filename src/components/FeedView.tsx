@@ -62,6 +62,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const touchStartY = useRef<number | null>(null);
   const touchEndY = useRef<number | null>(null);
   const isScrollingRef = useRef(false);
+  const lastFetchAttemptRef = useRef(0);
 
   // Record viewed word whenever index changes
   useEffect(() => {
@@ -70,12 +71,9 @@ export const FeedView: React.FC<FeedViewProps> = ({
     }
   }, [currentIndex, filteredCards]);
 
-  // Reset index when category changes and auto-fetch if category has few words
+  // Reset index when category changes
   useEffect(() => {
     setCurrentIndex(0);
-    if (onFetchRealtime && filteredCards.length < 3 && !isFetchingRealtime) {
-      onFetchRealtime(selectedCategory, 4, false);
-    }
   }, [selectedCategory]);
 
   // Primary Real-time AI Generation Handler (Instant Fresh Words via Gemini Flash)
@@ -106,7 +104,8 @@ export const FeedView: React.FC<FeedViewProps> = ({
     setIsLoadingNext(true);
     setFetchError(null);
 
-    if (onFetchRealtime) {
+    if (onFetchRealtime && Date.now() - lastFetchAttemptRef.current > 3000) {
+      lastFetchAttemptRef.current = Date.now();
       try {
         const fresh = await onFetchRealtime(selectedCategory, 3, false);
         if (fresh && fresh.length > 0) {
@@ -143,8 +142,16 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
   // Auto pre-fetch next real-time batch when near end
   useEffect(() => {
-    if (currentIndex >= filteredCards.length - 2 && onFetchRealtime && !isFetchingRealtime && !isLoadingNext) {
-      onFetchRealtime(selectedCategory, 4, false);
+    const shouldFetch = filteredCards.length >= 3 && 
+      currentIndex >= filteredCards.length - 2 && 
+      onFetchRealtime && 
+      !isFetchingRealtime && 
+      !isLoadingNext &&
+      (Date.now() - lastFetchAttemptRef.current > 5000);
+
+    if (shouldFetch) {
+      lastFetchAttemptRef.current = Date.now();
+      onFetchRealtime(selectedCategory, 3, false);
     }
   }, [currentIndex, filteredCards.length, onFetchRealtime, isFetchingRealtime, isLoadingNext, selectedCategory]);
 

@@ -60,8 +60,45 @@ export async function fetchFromFreeDictionary(rawWord: string): Promise<FreeDict
 }
 
 /**
+ * Direct client-side Tamil translator for browser environments
+ * (Used as instant fallback if server /api/translate-word returns 404 on static hosts)
+ */
+export async function clientTranslateToTamil(text: string): Promise<string> {
+  if (!text || !text.trim()) return '';
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ta&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const parts = data[0].map((item: any) => item[0]).filter(Boolean);
+        if (parts.length > 0) return parts.join(' ');
+      }
+    }
+  } catch {
+    // Fallback to MyMemory
+  }
+
+  try {
+    const mmUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|ta`;
+    const mmRes = await fetch(mmUrl, { signal: AbortSignal.timeout(3000) });
+    if (mmRes.ok) {
+      const mmData = await mmRes.json();
+      if (mmData?.responseData?.translatedText) {
+        return mmData.responseData.translatedText;
+      }
+    }
+  } catch {
+    // Silent
+  }
+
+  return '';
+}
+
+/**
  * Calls our server translation endpoint to translate English word, definition,
  * and example sentence into authentic, conversational Tamil.
+ * Falls back seamlessly to client-side translation if server responds with 404.
  */
 export async function translateWordContext(params: {
   word: string;
@@ -84,14 +121,25 @@ export async function translateWordContext(params: {
       };
     }
   } catch (err) {
-    console.warn('Translation request error:', err);
+    console.warn('Server translation endpoint unavailable, falling back to client translator:', err);
   }
 
-  // Graceful fallback
-  return {
-    tamilMeaning: params.word,
-    tamilSentence: params.example || '',
-  };
+  // Graceful client-side fallback (works on static hosting like Vercel)
+  try {
+    const [tamilMeaning, tamilSentence] = await Promise.all([
+      clientTranslateToTamil(params.word),
+      params.example ? clientTranslateToTamil(params.example) : Promise.resolve(''),
+    ]);
+    return {
+      tamilMeaning: tamilMeaning || params.word,
+      tamilSentence: tamilSentence || params.example || '',
+    };
+  } catch {
+    return {
+      tamilMeaning: params.word,
+      tamilSentence: params.example || '',
+    };
+  }
 }
 
 /**
@@ -197,8 +245,31 @@ export async function lookupDictionaryWord(rawWord: string, category: string = '
       };
     }
   } catch (err) {
-    console.warn('Word details fallback error:', err);
+    console.warn('Word details server endpoint unavailable:', err);
   }
 
-  return null;
+  // Pure client-side synthetic fallback (e.g. if deployed on static Vercel)
+  try {
+    const tamilMeaning = await clientTranslateToTamil(cleanWord);
+    const sampleSentence = `She used the word "${cleanWord}" clearly in everyday conversation.`;
+    const tamilSentence = await clientTranslateToTamil(sampleSentence);
+
+    return {
+      id: cleanWord.toLowerCase(),
+      word: cleanWord.charAt(0).toUpperCase() + cleanWord.slice(1),
+      tamilMeaning: tamilMeaning || cleanWord,
+      partOfSpeech: 'noun',
+      phonetic: '',
+      englishDefinition: `Common vocabulary word relating to ${category}.`,
+      englishSentence: sampleSentence,
+      tamilSentence: tamilSentence || sampleSentence,
+      category,
+      synonyms: [],
+      antonyms: [],
+      source: 'client-fallback',
+      dictionarySource: 'Bilingual Lexicon',
+    };
+  } catch {
+    return null;
+  }
 }

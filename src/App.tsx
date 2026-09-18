@@ -5,6 +5,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { WordCard, CategoryType, TabType, UserProgress } from './types';
+import { DEFAULT_STARTER_CARDS, CATEGORY_TOPIC_WORDS } from './constants';
+import { lookupDictionaryWord } from './utils/dictionaryApi';
 import { 
   getInitialProgress, 
   saveProgress, 
@@ -23,7 +25,9 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>('all');
   const [isFetchingRealtime, setIsFetchingRealtime] = useState(false);
   const [cards, setCards] = useState<WordCard[]>(() => {
-    return getCachedCustomCards();
+    const cached = getCachedCustomCards();
+    if (cached && cached.length > 0) return cached;
+    return DEFAULT_STARTER_CARDS;
   });
 
   const [progress, setProgress] = useState<UserProgress>(getInitialProgress);
@@ -33,7 +37,7 @@ export default function App() {
     saveProgress(progress);
   }, [progress]);
 
-  // Real-time batch fetching function from Gemini Flash backend
+  // Real-time batch fetching function from Gemini Flash backend with browser Free Dictionary fallback
   const fetchRealtimeBatch = async (category: string = 'all', count: number = 3, prepend: boolean = false): Promise<WordCard[]> => {
     setIsFetchingRealtime(true);
     try {
@@ -67,18 +71,59 @@ export default function App() {
           return freshWords;
         }
       }
+      
+      // Fallback for static hosts (e.g. Vercel without serverless) or offline API
+      return await fetchClientSideSeedBatch(category, count, prepend);
     } catch (err) {
-      console.warn('Real-time batch fetch error:', err);
+      console.warn('Backend unavailable, falling back to client-side Free Dictionary lookup:', err);
+      return await fetchClientSideSeedBatch(category, count, prepend);
     } finally {
       setIsFetchingRealtime(false);
+    }
+  };
+
+  // Client-side dictionary batch loader
+  const fetchClientSideSeedBatch = async (category: string, count: number, prepend: boolean): Promise<WordCard[]> => {
+    try {
+      const seedPool = (category !== 'all' && CATEGORY_TOPIC_WORDS[category])
+        ? CATEGORY_TOPIC_WORDS[category]
+        : Object.values(CATEGORY_TOPIC_WORDS).flat();
+
+      const seen = getSeenWordIds();
+      const existingIds = new Set(cards.map(c => c.id.toLowerCase()));
+      const available = seedPool.filter(w => !seen.includes(w.toLowerCase()) && !existingIds.has(w.toLowerCase()));
+      const wordsToFetch = (available.length >= count ? available : seedPool)
+        .sort(() => 0.5 - Math.random())
+        .slice(0, count);
+
+      const fetchedCards: WordCard[] = [];
+      for (const w of wordsToFetch) {
+        const card = await lookupDictionaryWord(w, category !== 'all' ? category : 'daily routine');
+        if (card) fetchedCards.push(card);
+      }
+
+      if (fetchedCards.length > 0) {
+        addSeenWordIds(fetchedCards.map(w => w.id));
+        setCards(prev => {
+          const prevIds = new Set(prev.map(c => c.id.toLowerCase()));
+          const nonDup = fetchedCards.filter(c => !prevIds.has(c.id.toLowerCase()));
+          if (nonDup.length === 0) return prev;
+          const updated = prepend ? [...nonDup, ...prev] : [...prev, ...nonDup];
+          saveCachedCustomCards(updated);
+          return updated;
+        });
+        return fetchedCards;
+      }
+    } catch (clientErr) {
+      console.warn('Client fallback fetch error:', clientErr);
     }
     return [];
   };
 
-  // On initial mount, only fetch fresh real-time words if cards collection is empty
+  // On initial mount, ensure we have cards
   useEffect(() => {
     if (cards.length === 0) {
-      fetchRealtimeBatch('all', 3, true);
+      setCards(DEFAULT_STARTER_CARDS);
     }
   }, []);
 
