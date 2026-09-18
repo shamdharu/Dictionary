@@ -29,3 +29,33 @@ export function speakEnglish(text: string, onEnd?: () => void) {
 
   window.speechSynthesis.speak(utterance);
 }
+
+/**
+ * Plays high-quality native human audio from Free Dictionary API if available,
+ * otherwise falls back smoothly to browser speech synthesis.
+ */
+export function playAudioOrSpeak(text: string, audioUrl?: string, onEnd?: () => void) {
+  if (audioUrl && audioUrl.trim()) {
+    try {
+      const fixedUrl = audioUrl.startsWith('//') ? `https:${audioUrl}` : audioUrl;
+      const audio = new Audio(fixedUrl);
+      audio.onended = () => onEnd?.();
+      audio.onerror = () => {
+        // Fallback to speech synthesis if audio link fails (e.g. 404 or CORS)
+        speakEnglish(text, onEnd);
+      };
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          speakEnglish(text, onEnd);
+        });
+      }
+      return;
+    } catch {
+      speakEnglish(text, onEnd);
+      return;
+    }
+  }
+
+  speakEnglish(text, onEnd);
+}

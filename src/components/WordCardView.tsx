@@ -13,7 +13,7 @@ import {
   Zap
 } from 'lucide-react';
 import { WordCard } from '../types';
-import { speakEnglish } from '../utils/speech';
+import { speakEnglish, playAudioOrSpeak } from '../utils/speech';
 
 interface WordCardViewProps {
   card: WordCard;
@@ -35,12 +35,11 @@ export const WordCardView: React.FC<WordCardViewProps> = ({
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isPlayingSentence, setIsPlayingSentence] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [showSynonyms, setShowSynonyms] = useState(false);
 
   const handlePlayWordAudio = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsPlayingAudio(true);
-    speakEnglish(card.word, () => setIsPlayingAudio(false));
+    playAudioOrSpeak(card.word, card.audioUrl, () => setIsPlayingAudio(false));
   };
 
   const handlePlaySentenceAudio = (e: React.MouseEvent) => {
@@ -109,6 +108,17 @@ Learned via Tamil-English Vocabulary Scroll!`;
           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30">
             {card.partOfSpeech}
           </span>
+          {card.audioUrl && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              <Volume2 className="w-3 h-3 text-emerald-400" />
+              <span>Studio Audio</span>
+            </span>
+          )}
+          {card.dictionarySource && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-300 border border-blue-500/30">
+              <span>Dict API</span>
+            </span>
+          )}
           {card.source === 'gemini-realtime' && (
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm animate-pulse">
               <Zap className="w-3 h-3 text-purple-400 fill-purple-400" />
@@ -205,15 +215,29 @@ Learned via Tamil-English Vocabulary Scroll!`;
           </div>
         </div>
 
-        {/* Synonyms preview if available */}
-        {card.synonyms && card.synonyms.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap text-xs text-stone-400">
-            <span className="font-semibold text-stone-500 uppercase tracking-wider">Similar Words:</span>
-            {card.synonyms.map((syn, idx) => (
-              <span key={idx} className="bg-stone-800/80 px-2 py-0.5 rounded text-stone-300 border border-stone-700/50">
-                {syn}
-              </span>
-            ))}
+        {/* Synonyms & Antonyms from Free Dictionary API */}
+        {((card.synonyms && card.synonyms.length > 0) || (card.antonyms && card.antonyms.length > 0)) && (
+          <div className="flex flex-col gap-1.5 text-xs text-stone-400">
+            {card.synonyms && card.synonyms.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-stone-500 uppercase tracking-wider text-[10px]">Synonyms:</span>
+                {card.synonyms.slice(0, 3).map((syn, idx) => (
+                  <span key={idx} className="bg-stone-800/80 px-2 py-0.5 rounded text-stone-300 border border-stone-700/50">
+                    {syn}
+                  </span>
+                ))}
+              </div>
+            )}
+            {card.antonyms && card.antonyms.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-rose-400/80 uppercase tracking-wider text-[10px]">Opposites:</span>
+                {card.antonyms.slice(0, 3).map((ant, idx) => (
+                  <span key={idx} className="bg-rose-950/40 px-2 py-0.5 rounded text-rose-300/90 border border-rose-800/40">
+                    {ant}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

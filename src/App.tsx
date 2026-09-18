@@ -85,9 +85,11 @@ export default function App() {
     return [];
   };
 
-  // On initial mount, fetch fresh real-time daily words immediately!
+  // On initial mount, only fetch fresh real-time words if cards collection is empty
   useEffect(() => {
-    fetchRealtimeBatch('all', 3, true);
+    if (cards.length === 0) {
+      fetchRealtimeBatch('all', 3, true);
+    }
   }, []);
 
   // Toggle Save / Bookmark
@@ -134,12 +136,10 @@ export default function App() {
   };
 
   // Add newly fetched dynamic card from Dictionary API
-  const handleAddNewDynamicCard = (newCard: WordCard) => {
+  const handleAddNewDynamicCard = (newCard: WordCard, prepend: boolean = true) => {
     setCards(prev => {
-      if (prev.some(c => c.id.toLowerCase() === newCard.id.toLowerCase())) {
-        return prev;
-      }
-      const updated = [...prev, newCard];
+      const filtered = prev.filter(c => c.id.toLowerCase() !== newCard.id.toLowerCase());
+      const updated = prepend ? [newCard, ...filtered] : [...filtered, newCard];
       // Save new card to local cached custom cards
       const customOnes = updated.filter(c => !CURATED_WORDS.some(cw => cw.id === c.id));
       saveCachedCustomCards(customOnes);

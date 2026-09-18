@@ -23,8 +23,10 @@ export interface WordCard {
   category: CategoryType | string;
   colorTheme?: string;
   synonyms?: string[];
+  antonyms?: string[];
   audioUrl?: string;
   source?: string;
+  dictionarySource?: string;
 }
 
 export interface UserProgress {

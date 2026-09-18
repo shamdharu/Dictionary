@@ -11,11 +11,15 @@ import {
   Filter, 
   Volume2,
   Shuffle,
-  Zap
+  Zap,
+  BookOpen,
+  Search
 } from 'lucide-react';
 import { WordCard, CategoryType, UserProgress } from '../types';
-import { CATEGORIES, EXPANDED_WORD_LIST } from '../data/wordsData';
+import { CATEGORIES } from '../data/wordsData';
 import { WordCardView } from './WordCardView';
+import { DictionaryLookupModal } from './DictionaryLookupModal';
+import { lookupDictionaryWord } from '../utils/dictionaryApi';
 import { speakEnglish } from '../utils/speech';
 
 interface FeedViewProps {
@@ -47,6 +51,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [direction, setDirection] = useState(0); // 1 = down/next, -1 = up/prev
   const [isLoadingNext, setIsLoadingNext] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [isDictionaryModalOpen, setIsDictionaryModalOpen] = useState(false);
 
   // Filter cards by category if selected
   const filteredCards = selectedCategory === 'all'
@@ -96,40 +101,45 @@ export const FeedView: React.FC<FeedViewProps> = ({
     fetchNextApiWord();
   }, [onFetchRealtime, selectedCategory, isFetchingRealtime]);
 
-  // Fetch dynamic word from API fallback
+  // Fetch dynamic word from API without relying on hardcoded word list
   const fetchNextApiWord = useCallback(async () => {
     setIsLoadingNext(true);
     setFetchError(null);
 
-    // Pick a word from the expanded list that hasn't been loaded yet
-    const existingIds = new Set(cards.map(c => c.id.toLowerCase()));
-    let candidate = EXPANDED_WORD_LIST.find(item => !existingIds.has(item.word.toLowerCase()));
-    
-    // If all expanded words loaded or none found, pick a random one
-    if (!candidate) {
-      const randomIndex = Math.floor(Math.random() * EXPANDED_WORD_LIST.length);
-      candidate = EXPANDED_WORD_LIST[randomIndex];
+    if (onFetchRealtime) {
+      try {
+        const fresh = await onFetchRealtime(selectedCategory, 3, false);
+        if (fresh && fresh.length > 0) {
+          setDirection(1);
+          setCurrentIndex(prev => prev + 1);
+          return;
+        }
+      } catch (err) {
+        console.warn('Realtime batch failed, trying direct dictionary lookup');
+      }
     }
 
+    // Dynamic topic-driven vocabulary fallback
+    const dynamicTopics = [
+      'resilience', 'empathy', 'eloquent', 'mindfulness', 'tenacity',
+      'ephemeral', 'serendipity', 'benevolent', 'perseverance', 'pragmatic'
+    ];
+    const existingIds = new Set(cards.map(c => c.id.toLowerCase()));
+    const unselectedWord = dynamicTopics.find(w => !existingIds.has(w)) || 'compassion';
+
     try {
-      const res = await fetch(`/api/word-details?word=${encodeURIComponent(candidate.word)}&category=${encodeURIComponent(candidate.category)}`);
-      if (res.ok) {
-        const newCard: WordCard = await res.json();
+      const newCard = await lookupDictionaryWord(unselectedWord, selectedCategory);
+      if (newCard) {
         onAddNewDynamicCard(newCard);
         setDirection(1);
         setCurrentIndex(prev => prev + 1);
-      } else {
-        throw new Error('Could not fetch word details from dictionary API');
       }
     } catch (err: any) {
       console.warn('Dynamic fetch fallback:', err);
-      setFetchError('Pulling from local vocabulary archive...');
-      setTimeout(() => setFetchError(null), 3000);
-      setCurrentIndex(0);
     } finally {
       setIsLoadingNext(false);
     }
-  }, [cards, onAddNewDynamicCard]);
+  }, [cards, onAddNewDynamicCard, onFetchRealtime, selectedCategory]);
 
   // Auto pre-fetch next real-time batch when near end
   useEffect(() => {
@@ -287,20 +297,32 @@ export const FeedView: React.FC<FeedViewProps> = ({
           </div>
 
           {/* Dynamic Real-time AI Word Fetch Button */}
-          <button
-            id="btn-shuffle-dynamic-word"
-            onClick={handleGenerateFreshRealtime}
-            disabled={isLoadingNext || isFetchingRealtime}
-            title="Generate completely new, unrepeated words in real-time with Gemini AI"
-            className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-full bg-gradient-to-r from-amber-500/20 to-purple-500/20 hover:from-amber-500/30 hover:to-purple-500/30 text-amber-200 border border-amber-500/40 transition-all shadow-sm active:scale-95 disabled:opacity-50"
-          >
-            {isLoadingNext || isFetchingRealtime ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-            ) : (
-              <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
-            )}
-            <span className="font-medium">Real-time Words</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              id="btn-open-dictionary-lookup"
+              onClick={() => setIsDictionaryModalOpen(true)}
+              title="Search any word via Free Dictionary API"
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-stone-900 hover:bg-stone-850 text-stone-200 border border-stone-700/80 transition-all shadow-sm active:scale-95"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+              <span className="font-medium">Dict API</span>
+            </button>
+
+            <button
+              id="btn-shuffle-dynamic-word"
+              onClick={handleGenerateFreshRealtime}
+              disabled={isLoadingNext || isFetchingRealtime}
+              title="Generate completely new, unrepeated words in real-time with Gemini AI"
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500/20 to-purple-500/20 hover:from-amber-500/30 hover:to-purple-500/30 text-amber-200 border border-amber-500/40 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            >
+              {isLoadingNext || isFetchingRealtime ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+              ) : (
+                <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+              )}
+              <span className="font-medium">Real-time</span>
+            </button>
+          </div>
         </div>
 
         {/* Categories Horizontal Scroll Pills */}
@@ -389,6 +411,19 @@ export const FeedView: React.FC<FeedViewProps> = ({
       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full bg-stone-900/70 backdrop-blur-md border border-stone-800 text-[11px] text-stone-400">
         <span>Word <strong>{currentIndex + 1}</strong> of {filteredCards.length}</span>
       </div>
+
+      {/* Free Dictionary API Real-time Lookup Modal */}
+      <DictionaryLookupModal
+        isOpen={isDictionaryModalOpen}
+        onClose={() => setIsDictionaryModalOpen(false)}
+        onAddWordToFeed={(newCard, jumpToIt) => {
+          onAddNewDynamicCard(newCard);
+          if (jumpToIt) {
+            setDirection(-1);
+            setCurrentIndex(0);
+          }
+        }}
+      />
     </div>
   );
 };

@@ -15,9 +15,29 @@ app.use(express.json());
 // In-memory cache for API-fetched and translated words
 const wordCache = new Map<string, any>();
 
+// Circuit breaker to prevent hammering Gemini when user's free-tier quota is exhausted (429 RESOURCE_EXHAUSTED)
+let geminiQuotaCooldownUntil = 0;
+
+function isGeminiAvailable(): boolean {
+  if (Date.now() < geminiQuotaCooldownUntil) {
+    return false;
+  }
+  return Boolean(process.env.GEMINI_API_KEY);
+}
+
+function handleGeminiError(err: any) {
+  const errMsg = String(err?.message || err || '');
+  const isQuota = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded');
+  if (isQuota) {
+    // Back off for 60 seconds to respect Gemini API rate limits
+    geminiQuotaCooldownUntil = Date.now() + 60000;
+  }
+}
+
 // Lazy Gemini client helper
 let geminiClient: GoogleGenAI | null = null;
 function getGemini(): GoogleGenAI | null {
+  if (!isGeminiAvailable()) return null;
   const apiKey = process.env.GEMINI_API_KEY;
   if (!geminiClient && apiKey) {
     try {
@@ -75,6 +95,87 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Dedicated Translation API endpoint
+// Translates English word, definition, and example into natural Tamil
+app.post('/api/translate-word', async (req, res) => {
+  try {
+    const { word, definition = '', example = '', category = 'general' } = req.body || {};
+    if (!word) {
+      return res.status(400).json({ error: 'Word is required' });
+    }
+
+    const ai = getGemini();
+    if (ai) {
+      try {
+        const prompt = `You are an expert English-Tamil bilingual lexicographer.
+Provide accurate, natural Tamil translation for:
+Word: "${word}"
+Definition: "${definition}"
+Example: "${example}"
+Category: "${category}"
+
+Return ONLY a raw JSON object:
+{
+  "tamilMeaning": "Accurate clear Tamil meaning in Tamil script",
+  "tamilSentence": "Natural Tamil translation of the example sentence"
+}`;
+
+        const aiResponse = await Promise.race([
+          ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: { responseMimeType: 'application/json' },
+          }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 10000)),
+        ]);
+
+        const parsed = JSON.parse(aiResponse.text?.trim() || '{}');
+        if (parsed.tamilMeaning) {
+          return res.json({
+            tamilMeaning: parsed.tamilMeaning,
+            tamilSentence: parsed.tamilSentence || '',
+          });
+        }
+      } catch (err) {
+        handleGeminiError(err);
+        // Fall back gracefully to translateToTamil
+      }
+    }
+
+    const [tamilMeaning, tamilSentence] = await Promise.all([
+      translateToTamil(word),
+      example ? translateToTamil(example) : Promise.resolve(''),
+    ]);
+
+    return res.json({
+      tamilMeaning: tamilMeaning || word,
+      tamilSentence: tamilSentence || example,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Translation failed', details: err.message });
+  }
+});
+
+// Proxy endpoint for Free Dictionary API: https://api.dictionaryapi.dev/api/v2/entries/en/:word
+app.get('/api/dictionary/:word', async (req, res) => {
+  const queryWord = (req.params.word || '').trim().toLowerCase();
+  if (!queryWord) return res.status(400).json({ error: 'Word parameter required' });
+
+  try {
+    const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(queryWord)}`, {
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (dictRes.ok) {
+      const data = await dictRes.json();
+      return res.json(data);
+    }
+    return res.status(dictRes.status).json({ error: 'Word not found in Free Dictionary' });
+  } catch {
+    return res.status(503).json({ error: 'Free Dictionary API unavailable from server' });
+  }
+});
+
 // Real-time Dynamic Words Generation Endpoint
 // Generates fresh, non-repeated everyday English words with Tamil translations
 app.post('/api/realtime-words', async (req, res) => {
@@ -126,8 +227,9 @@ Return a JSON object with a "words" array containing ${targetCount} items:
 
 Format ONLY as pure raw JSON without markdown code blocks or commentary.`;
 
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-3.8-flash'];
+      const modelsToTry = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
       for (const modelName of modelsToTry) {
+        if (!isGeminiAvailable()) break;
         try {
           const aiResponse = await Promise.race([
             ai.models.generateContent({
@@ -138,7 +240,7 @@ Format ONLY as pure raw JSON without markdown code blocks or commentary.`;
               },
             }),
             new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout waiting for Gemini response')), 20000)
+              setTimeout(() => reject(new Error('Timeout waiting for Gemini response')), 10000)
             ),
           ]);
 
@@ -167,8 +269,8 @@ Format ONLY as pure raw JSON without markdown code blocks or commentary.`;
             return res.json({ words: formattedWords, source: 'gemini-realtime', model: modelName });
           }
         } catch (genErr) {
-          console.warn(`Gemini ${modelName} attempt error:`, genErr);
-          // Try next model
+          handleGeminiError(genErr);
+          if (!isGeminiAvailable()) break;
         }
       }
     }
@@ -239,8 +341,9 @@ app.get('/api/word-details', async (req, res) => {
     const ai = getGemini();
 
     if (ai) {
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-3.8-flash'];
+      const modelsToTry = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
       for (const modelName of modelsToTry) {
+        if (!isGeminiAvailable()) break;
         try {
           const prompt = `You are an expert bilingual lexicographer for Tamil and English.
 Analyze the common daily English word: "${queryWord}".
@@ -266,7 +369,7 @@ Format ONLY as raw JSON without markdown code fences.`;
               },
             }),
             new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('Gemini timeout')), 15000)
+              setTimeout(() => reject(new Error('Gemini timeout')), 8000)
             ),
           ]);
 
@@ -290,12 +393,15 @@ Format ONLY as raw JSON without markdown code fences.`;
             wordCache.set(cacheKey, result);
             return res.json(result);
           }
-        } catch {
-          // If gemini-3.8-flash experiences 503 or timeout, continue to next model or dictionary fallback
-          continue;
+        } catch (err) {
+          handleGeminiError(err);
+          if (!isGeminiAvailable()) break;
         }
       }
     }
+
+    let audioUrl = '';
+    let antonyms: string[] = [];
 
     // 3. Query Free Dictionary API with safe timeout
     try {
@@ -310,6 +416,11 @@ Format ONLY as raw JSON without markdown code fences.`;
           word = entry.word ? entry.word.charAt(0).toUpperCase() + entry.word.slice(1) : word;
           phonetic = entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text || '';
 
+          const foundAudio = entry.phonetics?.find((p: any) => p.audio && p.audio.trim().length > 0)?.audio;
+          if (foundAudio) {
+            audioUrl = foundAudio.startsWith('//') ? `https:${foundAudio}` : foundAudio;
+          }
+
           if (Array.isArray(entry.meanings) && entry.meanings.length > 0) {
             const primaryMeaning = entry.meanings[0];
             partOfSpeech = primaryMeaning.partOfSpeech || 'noun';
@@ -320,6 +431,9 @@ Format ONLY as raw JSON without markdown code fences.`;
             }
             if (Array.isArray(primaryMeaning.synonyms)) {
               synonyms = primaryMeaning.synonyms.slice(0, 3);
+            }
+            if (Array.isArray(primaryMeaning.antonyms)) {
+              antonyms = primaryMeaning.antonyms.slice(0, 3);
             }
           }
         }
@@ -356,7 +470,10 @@ Format ONLY as raw JSON without markdown code fences.`;
       tamilSentence,
       category,
       synonyms,
+      antonyms,
+      audioUrl: audioUrl || undefined,
       source: 'dictionary-api-translated',
+      dictionarySource: 'Free Dictionary API (api.dictionaryapi.dev)',
     };
 
     wordCache.set(cacheKey, result);
