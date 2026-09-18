@@ -1,0 +1,6 @@
+{
+  "name": "Tamil-English Vocabulary Scroll",
+  "description": "A mobile-friendly TikTok/Reels-style vertical vocabulary feed for learning daily English words with Tamil meanings, parts of speech, and bilingual context sentences.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
