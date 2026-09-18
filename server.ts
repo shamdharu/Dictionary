@@ -3,9 +3,22 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
-import { VOCABULARY_CATALOG } from './src/data/vocabularyCatalog.ts';
 
 dotenv.config();
+
+// Topic seed words used to query the Free Dictionary API dynamically when needed
+const CATEGORY_TOPIC_WORDS: Record<string, string[]> = {
+  greetings: ['welcome', 'cordial', 'salute', 'embrace', 'reception', 'compliment', 'respectful', 'courtesy', 'hospitality', 'farewell'],
+  emotions: ['cheerful', 'delighted', 'furious', 'serene', 'optimistic', 'melancholy', 'anxious', 'compassion', 'generous', 'patient'],
+  food: ['flavor', 'delicious', 'aroma', 'nourish', 'appetite', 'crispy', 'savory', 'refreshing', 'nutrition', 'spicy'],
+  work: ['efficient', 'collaborate', 'punctual', 'deadline', 'initiative', 'schedule', 'productive', 'diligent', 'responsibility'],
+  travel: ['journey', 'destination', 'itinerary', 'voyage', 'passenger', 'scenic', 'explore', 'expedition', 'departure', 'arrival'],
+  weather: ['breeze', 'monsoon', 'scorching', 'chilly', 'humidity', 'forecast', 'downpour', 'blizzard', 'climate'],
+  family: ['harmony', 'kinship', 'affection', 'sibling', 'companion', 'guidance', 'heritage', 'bond', 'relative'],
+  'daily routine': ['routine', 'organize', 'habitual', 'punctual', 'exercise', 'chore', 'discipline', 'restful', 'grocery'],
+  health: ['wellness', 'immunity', 'remedy', 'vitality', 'hygiene', 'fitness', 'nutrition', 'recovery', 'prescription'],
+  shopping: ['purchase', 'discount', 'bargain', 'expense', 'affordable', 'receipt', 'warranty', 'retail', 'savings'],
+};
 
 const app = express();
 const PORT = 3000;
@@ -275,32 +288,116 @@ Format ONLY as pure raw JSON without markdown code blocks or commentary.`;
       }
     }
 
-    // Fallback: If Gemini unavailable, use curated catalog or dictionary fallback
-    // Filter out already seen words
-    const catalogEntries = Object.entries(VOCABULARY_CATALOG)
-      .filter(([id]) => !excludeList.includes(id.toLowerCase()))
-      .filter(([_, data]) => category === 'all' || data.category === category);
+    // Fallback: If Gemini unavailable, query the Free Dictionary API dynamically using topic seed words
+    let candidateWords: string[] = [];
+    if (category !== 'all' && CATEGORY_TOPIC_WORDS[category]) {
+      candidateWords = CATEGORY_TOPIC_WORDS[category];
+    } else {
+      candidateWords = Object.values(CATEGORY_TOPIC_WORDS).flat();
+    }
 
-    const pool = catalogEntries.length > 0 
-      ? catalogEntries 
-      : Object.entries(VOCABULARY_CATALOG);
+    const availableWords = candidateWords.filter(w => !excludeList.includes(w.toLowerCase()));
+    const wordsToFetch = (availableWords.length >= targetCount ? availableWords : candidateWords)
+      .sort(() => 0.5 - Math.random())
+      .slice(0, targetCount);
 
-    const shuffled = [...pool].sort(() => 0.5 - Math.random()).slice(0, targetCount);
+    const fallbackWords = await Promise.all(
+      wordsToFetch.map(w => fetchDictionaryWordCard(w, category !== 'all' ? category : 'daily routine'))
+    );
 
-    const fallbackWords = shuffled.map(([id, data]) => ({
-      id,
-      ...data,
-      source: 'live-fallback',
-    }));
-
-    return res.json({ words: fallbackWords, source: 'live-fallback' });
+    fallbackWords.forEach((w: any) => wordCache.set(w.id, w));
+    return res.json({ words: fallbackWords, source: 'dictionary-api' });
   } catch (error: any) {
     console.error('Error generating realtime words:', error);
     return res.status(500).json({ error: 'Failed to generate realtime words', details: error.message });
   }
 });
 
-// Dynamic Word Detail Endpoint: uses Pre-seeded catalog -> Gemini -> Free Dictionary API -> Fallback
+// Helper: Query Free Dictionary API & translate to Tamil
+async function fetchDictionaryWordCard(queryWord: string, category: string = 'daily routine'): Promise<any> {
+  let word = queryWord.charAt(0).toUpperCase() + queryWord.slice(1);
+  let partOfSpeech = 'noun';
+  let phonetic = '';
+  let englishDefinition = '';
+  let englishSentence = '';
+  let tamilMeaning = '';
+  let tamilSentence = '';
+  let synonyms: string[] = [];
+  let antonyms: string[] = [];
+  let audioUrl = '';
+
+  try {
+    const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(queryWord)}`, {
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (dictRes.ok) {
+      const dictData = await dictRes.json();
+      if (Array.isArray(dictData) && dictData.length > 0) {
+        const entry = dictData[0];
+        word = entry.word ? entry.word.charAt(0).toUpperCase() + entry.word.slice(1) : word;
+        phonetic = entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text || '';
+
+        const foundAudio = entry.phonetics?.find((p: any) => p.audio && p.audio.trim().length > 0)?.audio;
+        if (foundAudio) {
+          audioUrl = foundAudio.startsWith('//') ? `https:${foundAudio}` : foundAudio;
+        }
+
+        if (Array.isArray(entry.meanings) && entry.meanings.length > 0) {
+          const primaryMeaning = entry.meanings[0];
+          partOfSpeech = primaryMeaning.partOfSpeech || 'noun';
+          if (Array.isArray(primaryMeaning.definitions) && primaryMeaning.definitions.length > 0) {
+            const defObj = primaryMeaning.definitions.find((d: any) => d.example) || primaryMeaning.definitions[0];
+            englishDefinition = defObj.definition || '';
+            englishSentence = defObj.example || '';
+          }
+          if (Array.isArray(primaryMeaning.synonyms)) {
+            synonyms = primaryMeaning.synonyms.slice(0, 3);
+          }
+          if (Array.isArray(primaryMeaning.antonyms)) {
+            antonyms = primaryMeaning.antonyms.slice(0, 3);
+          }
+        }
+      }
+    }
+  } catch {
+    // Safe fallback if dictionary API times out
+  }
+
+  if (!englishSentence) {
+    englishSentence = `She used the word ${queryWord} naturally in everyday conversation.`;
+  }
+  if (!englishDefinition) {
+    englishDefinition = `A commonly used English word relating to ${category}.`;
+  }
+
+  const [translatedMeaning, translatedSentence] = await Promise.all([
+    translateToTamil(queryWord),
+    translateToTamil(englishSentence),
+  ]);
+
+  tamilMeaning = translatedMeaning || `${queryWord}`;
+  tamilSentence = translatedSentence || englishSentence;
+
+  return {
+    id: queryWord.toLowerCase(),
+    word,
+    tamilMeaning,
+    partOfSpeech,
+    phonetic,
+    englishDefinition,
+    englishSentence,
+    tamilSentence,
+    category,
+    synonyms,
+    antonyms,
+    audioUrl: audioUrl || undefined,
+    source: 'dictionary-api-translated',
+    dictionarySource: 'Free Dictionary API (api.dictionaryapi.dev)',
+  };
+}
+
+// Dynamic Word Detail Endpoint: uses Gemini -> Free Dictionary API -> Fallback
 app.get('/api/word-details', async (req, res) => {
   const queryWord = (req.query.word as string || '').trim().toLowerCase();
   const category = (req.query.category as string || 'daily routine').toLowerCase();
@@ -314,30 +411,8 @@ app.get('/api/word-details', async (req, res) => {
     return res.json(wordCache.get(cacheKey));
   }
 
-  // 1. Instant check against verified VOCABULARY_CATALOG (0ms latency, verified Tamil translations)
-  if (VOCABULARY_CATALOG[queryWord]) {
-    const item = VOCABULARY_CATALOG[queryWord];
-    const card = {
-      id: queryWord,
-      ...item,
-      category: item.category || category,
-      source: 'verified-catalog',
-    };
-    wordCache.set(cacheKey, card);
-    return res.json(card);
-  }
-
   try {
-    let word = queryWord.charAt(0).toUpperCase() + queryWord.slice(1);
-    let partOfSpeech = 'noun';
-    let phonetic = '';
-    let englishDefinition = '';
-    let englishSentence = '';
-    let tamilMeaning = '';
-    let tamilSentence = '';
-    let synonyms: string[] = [];
-
-    // 2. Try Gemini API with fallback models (gemini-3.8-flash -> gemini-3.1-flash-lite)
+    // 1. Try Gemini API if available and quota permits
     const ai = getGemini();
 
     if (ai) {
@@ -400,82 +475,8 @@ Format ONLY as raw JSON without markdown code fences.`;
       }
     }
 
-    let audioUrl = '';
-    let antonyms: string[] = [];
-
-    // 3. Query Free Dictionary API with safe timeout
-    try {
-      const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(queryWord)}`, {
-        signal: AbortSignal.timeout(3500),
-      });
-
-      if (dictRes.ok) {
-        const dictData = await dictRes.json();
-        if (Array.isArray(dictData) && dictData.length > 0) {
-          const entry = dictData[0];
-          word = entry.word ? entry.word.charAt(0).toUpperCase() + entry.word.slice(1) : word;
-          phonetic = entry.phonetic || entry.phonetics?.find((p: any) => p.text)?.text || '';
-
-          const foundAudio = entry.phonetics?.find((p: any) => p.audio && p.audio.trim().length > 0)?.audio;
-          if (foundAudio) {
-            audioUrl = foundAudio.startsWith('//') ? `https:${foundAudio}` : foundAudio;
-          }
-
-          if (Array.isArray(entry.meanings) && entry.meanings.length > 0) {
-            const primaryMeaning = entry.meanings[0];
-            partOfSpeech = primaryMeaning.partOfSpeech || 'noun';
-            if (Array.isArray(primaryMeaning.definitions) && primaryMeaning.definitions.length > 0) {
-              const defObj = primaryMeaning.definitions.find((d: any) => d.example) || primaryMeaning.definitions[0];
-              englishDefinition = defObj.definition || '';
-              englishSentence = defObj.example || '';
-            }
-            if (Array.isArray(primaryMeaning.synonyms)) {
-              synonyms = primaryMeaning.synonyms.slice(0, 3);
-            }
-            if (Array.isArray(primaryMeaning.antonyms)) {
-              antonyms = primaryMeaning.antonyms.slice(0, 3);
-            }
-          }
-        }
-      }
-    } catch {
-      // Safe fallback if dictionaryapi.dev is sluggish
-    }
-
-    // 4. Construct clean default context if missing
-    if (!englishSentence) {
-      englishSentence = `She used the word ${queryWord} naturally in everyday conversation.`;
-    }
-    if (!englishDefinition) {
-      englishDefinition = `A commonly used English word relating to ${category}.`;
-    }
-
-    // 5. Auto-translate word and example sentence into Tamil using Free Translation API
-    const [translatedMeaning, translatedSentence] = await Promise.all([
-      translateToTamil(queryWord),
-      translateToTamil(englishSentence),
-    ]);
-
-    tamilMeaning = translatedMeaning || `${queryWord}`;
-    tamilSentence = translatedSentence || englishSentence;
-
-    const result = {
-      id: queryWord,
-      word,
-      tamilMeaning,
-      partOfSpeech,
-      phonetic,
-      englishDefinition,
-      englishSentence,
-      tamilSentence,
-      category,
-      synonyms,
-      antonyms,
-      audioUrl: audioUrl || undefined,
-      source: 'dictionary-api-translated',
-      dictionarySource: 'Free Dictionary API (api.dictionaryapi.dev)',
-    };
-
+    // 2. Query Free Dictionary API + translate to Tamil
+    const result = await fetchDictionaryWordCard(queryWord, category);
     wordCache.set(cacheKey, result);
     return res.json(result);
   } catch (error: any) {

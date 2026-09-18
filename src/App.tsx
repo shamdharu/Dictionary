@@ -5,7 +5,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { WordCard, CategoryType, TabType, UserProgress } from './types';
-import { CURATED_WORDS } from './data/wordsData';
 import { 
   getInitialProgress, 
   saveProgress, 
@@ -24,15 +23,7 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>('all');
   const [isFetchingRealtime, setIsFetchingRealtime] = useState(false);
   const [cards, setCards] = useState<WordCard[]>(() => {
-    const cached = getCachedCustomCards();
-    // Deduplicate by id
-    const map = new Map<string, WordCard>();
-    // Put cached real-time words first, then curated
-    cached.forEach(c => map.set(c.id, c));
-    CURATED_WORDS.forEach(c => {
-      if (!map.has(c.id)) map.set(c.id, c);
-    });
-    return Array.from(map.values());
+    return getCachedCustomCards();
   });
 
   const [progress, setProgress] = useState<UserProgress>(getInitialProgress);
@@ -69,8 +60,7 @@ export default function App() {
             if (nonDuplicateWords.length === 0) return prev;
 
             const updated = prepend ? [...nonDuplicateWords, ...prev] : [...prev, ...nonDuplicateWords];
-            const customOnes = updated.filter(c => !CURATED_WORDS.some(cw => cw.id === c.id));
-            saveCachedCustomCards(customOnes);
+            saveCachedCustomCards(updated);
             return updated;
           });
 
@@ -141,8 +131,7 @@ export default function App() {
       const filtered = prev.filter(c => c.id.toLowerCase() !== newCard.id.toLowerCase());
       const updated = prepend ? [newCard, ...filtered] : [...filtered, newCard];
       // Save new card to local cached custom cards
-      const customOnes = updated.filter(c => !CURATED_WORDS.some(cw => cw.id === c.id));
-      saveCachedCustomCards(customOnes);
+      saveCachedCustomCards(updated);
       return updated;
     });
   };

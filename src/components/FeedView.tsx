@@ -16,7 +16,7 @@ import {
   Search
 } from 'lucide-react';
 import { WordCard, CategoryType, UserProgress } from '../types';
-import { CATEGORIES } from '../data/wordsData';
+import { CATEGORIES } from '../constants';
 import { WordCardView } from './WordCardView';
 import { DictionaryLookupModal } from './DictionaryLookupModal';
 import { lookupDictionaryWord } from '../utils/dictionaryApi';
