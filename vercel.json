@@ -3,8 +3,11 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.ts": {
+    "api/words.ts": {
       "maxDuration": 60
+    },
+    "api/word-details.ts": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
