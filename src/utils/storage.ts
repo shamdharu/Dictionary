@@ -11,15 +11,17 @@ export function getTodayString(): string {
 
 export function getInitialProgress(): UserProgress {
   const today = getTodayString();
+  // Starts genuinely empty — words are only ever added by the learner, so the
+  // app never pretends pre-seeded vocabulary was already saved or viewed.
   const defaultProgress: UserProgress = {
     streak: 1,
     lastActiveDate: today,
-    savedWordIds: ['grateful', 'delicious', 'deadline'],
-    viewedWordIds: ['grateful'],
+    savedWordIds: [],
+    viewedWordIds: [],
     learnedWordIds: [],
     dailyGoal: 10,
-    todayLearnedCount: 1,
-    history: [{ date: today, count: 1 }],
+    todayLearnedCount: 0,
+    history: [{ date: today, count: 0 }],
   };
 
   if (typeof window === 'undefined') return defaultProgress;
@@ -67,22 +69,33 @@ export function saveProgress(progress: UserProgress): void {
   }
 }
 
-export function getCachedCustomCards(): any[] {
+/**
+ * Cards are cached per category so switching topics never shows words that
+ * belong to a different topic.
+ */
+export function getCachedCards(category: string): any[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(CACHED_CARDS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const store = JSON.parse(raw);
+    const list = store && Array.isArray(store[category]) ? store[category] : [];
+    return list;
   } catch {
     return [];
   }
 }
 
-export function saveCachedCustomCards(cards: any[]): void {
+export function saveCachedCards(category: string, cards: any[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(CACHED_CARDS_KEY, JSON.stringify(cards));
+    const raw = localStorage.getItem(CACHED_CARDS_KEY);
+    const store = raw ? JSON.parse(raw) : {};
+    const next = store && typeof store === 'object' ? store : {};
+    next[category] = cards;
+    localStorage.setItem(CACHED_CARDS_KEY, JSON.stringify(next));
   } catch (err) {
-    console.warn('Error saving cached custom cards', err);
+    console.warn('Error saving cached cards', err);
   }
 }
 

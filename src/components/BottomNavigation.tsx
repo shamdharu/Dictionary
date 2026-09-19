@@ -9,6 +9,23 @@ interface BottomNavigationProps {
   streak: number;
 }
 
+interface TabConfig {
+  id: TabType;
+  label: string;
+  Icon: React.ComponentType<{ className?: string; strokeWidth?: number; fill?: string }>;
+}
+
+const TABS: TabConfig[] = [
+  { id: 'feed', label: 'Feed', Icon: Layers },
+  { id: 'saved', label: 'Saved', Icon: Bookmark },
+  { id: 'stats', label: 'Progress', Icon: BarChart3 },
+];
+
+/**
+ * Frosted-glass tab bar. The active tab gets the blue-pink gradient treatment
+ * (pill behind the icon, gradient label, and a top indicator), while inactive
+ * tabs stay neutral gray.
+ */
 export const BottomNavigation: React.FC<BottomNavigationProps> = ({
   activeTab,
   onSelectTab,
@@ -16,69 +33,65 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({
   streak,
 }) => {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-stone-950/90 backdrop-blur-xl border-t border-stone-800/80 safe-area-bottom">
-      <div className="max-w-md mx-auto flex items-center justify-around px-2 py-2">
-        {/* Feed Tab */}
-        <button
-          id="nav-tab-feed"
-          onClick={() => onSelectTab('feed')}
-          className={`flex flex-col items-center justify-center flex-1 py-1 px-2 rounded-xl transition-all duration-150 ${
-            activeTab === 'feed'
-              ? 'text-amber-400 font-bold scale-105'
-              : 'text-stone-400 hover:text-stone-200'
-          }`}
-        >
-          <div className="relative">
-            <Layers className="w-5 h-5" />
-            {activeTab === 'feed' && (
-              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-amber-400" />
-            )}
-          </div>
-          <span className="text-[11px] mt-1 tracking-tight">Feed</span>
-        </button>
+    <nav className="fixed bottom-0 left-0 right-0 z-50 frosted-nav border-t border-[#ECE9F6] safe-area-bottom">
+      <div className="max-w-md mx-auto flex items-center justify-around px-2 py-1.5">
+        {TABS.map(({ id, label, Icon }) => {
+          const isActive = activeTab === id;
 
-        {/* Saved Words Tab */}
-        <button
-          id="nav-tab-saved"
-          onClick={() => onSelectTab('saved')}
-          className={`flex flex-col items-center justify-center flex-1 py-1 px-2 rounded-xl transition-all duration-150 ${
-            activeTab === 'saved'
-              ? 'text-rose-400 font-bold scale-105'
-              : 'text-stone-400 hover:text-stone-200'
-          }`}
-        >
-          <div className="relative">
-            <Bookmark className={`w-5 h-5 ${activeTab === 'saved' ? 'fill-current' : ''}`} />
-            {savedCount > 0 && (
-              <span className="absolute -top-1.5 -right-2.5 bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full min-w-4 text-center">
-                {savedCount}
-              </span>
-            )}
-          </div>
-          <span className="text-[11px] mt-1 tracking-tight">Saved</span>
-        </button>
+          return (
+            <button
+              key={id}
+              id={`nav-tab-${id}`}
+              onClick={() => onSelectTab(id)}
+              aria-current={isActive ? 'page' : undefined}
+              className="relative flex flex-col items-center justify-center flex-1 py-1.5 px-2 rounded-2xl transition-all duration-200 active:scale-95"
+            >
+              {/* Active indicator bar */}
+              {isActive && (
+                <span className="absolute -top-0.5 h-[3px] w-8 rounded-full brand-gradient" />
+              )}
 
-        {/* Progress / Stats Tab */}
-        <button
-          id="nav-tab-stats"
-          onClick={() => onSelectTab('stats')}
-          className={`flex flex-col items-center justify-center flex-1 py-1 px-2 rounded-xl transition-all duration-150 ${
-            activeTab === 'stats'
-              ? 'text-emerald-400 font-bold scale-105'
-              : 'text-stone-400 hover:text-stone-200'
-          }`}
-        >
-          <div className="relative flex items-center">
-            <BarChart3 className="w-5 h-5" />
-            {streak > 0 && (
-              <span className="absolute -top-1.5 -right-3 flex items-center text-[10px] text-orange-400 font-black">
-                <Flame className="w-3 h-3 fill-orange-500" />
-                {streak}
+              <span className="relative flex items-center justify-center">
+                <span
+                  className={`flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200 ${
+                    isActive
+                      ? 'brand-gradient text-white shadow-lg shadow-[#EC4899]/30 scale-105'
+                      : 'text-[#9CA3AF]'
+                  }`}
+                >
+                  <Icon
+                    className="w-5 h-5"
+                    strokeWidth={1.75}
+                    fill={isActive ? 'currentColor' : 'none'}
+                  />
+                </span>
+
+                {/* Saved badge */}
+                {id === 'saved' && savedCount > 0 && (
+                  <span className="absolute -top-1 -right-1 brand-gradient text-white text-[10px] font-bold px-1.5 rounded-full min-w-[18px] text-center leading-[18px] h-[18px]">
+                    {savedCount}
+                  </span>
+                )}
+
+                {/* Streak badge */}
+                {id === 'stats' && streak > 0 && (
+                  <span className="absolute -top-1 -right-2 inline-flex items-center gap-0.5 text-[10px] font-black text-[#EC4899]">
+                    <Flame className="w-3 h-3 text-[#EC4899]" strokeWidth={2} fill="currentColor" />
+                    {streak}
+                  </span>
+                )}
               </span>
-            )}
-          </div>
-          <span className="text-[11px] mt-1 tracking-tight">Progress</span>
-        </button>
+
+              <span
+                className={`text-[11px] mt-0.5 font-semibold transition-colors ${
+                  isActive ? 'brand-gradient-text' : 'text-[#9CA3AF]'
+                }`}
+              >
+                {label}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </nav>
   );

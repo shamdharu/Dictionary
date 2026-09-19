@@ -1,16 +1,14 @@
-import React, { useState } from 'react';
-import { 
-  Volume2, 
-  Bookmark, 
-  CheckCircle2, 
-  Share2, 
-  Sparkles, 
-  BookOpen, 
-  ArrowDown, 
-  Check, 
+import React, { useState, useRef, useCallback } from 'react';
+import {
+  Volume2,
+  Bookmark,
+  CheckCircle2,
+  Share2,
+  Sparkles,
   Languages,
-  Layers,
-  Zap
+  Check,
+  Gauge,
+  Heart,
 } from 'lucide-react';
 import { WordCard } from '../types';
 import { speakEnglish, playAudioOrSpeak } from '../utils/speech';
@@ -21,7 +19,27 @@ interface WordCardViewProps {
   isLearned: boolean;
   onToggleSave: (wordId: string) => void;
   onToggleLearned: (wordId: string) => void;
-  onNext?: () => void;
+}
+
+/** Positions for the sparkle particles thrown out by the double-tap burst. */
+const SPARKLES = [
+  { dx: '-58px', dy: '-44px', delay: '0ms', size: 14 },
+  { dx: '62px', dy: '-38px', delay: '40ms', size: 11 },
+  { dx: '-46px', dy: '52px', delay: '80ms', size: 12 },
+  { dx: '52px', dy: '46px', delay: '20ms', size: 15 },
+  { dx: '0px', dy: '-72px', delay: '60ms', size: 10 },
+  { dx: '-70px', dy: '6px', delay: '100ms', size: 10 },
+  { dx: '72px', dy: '4px', delay: '30ms', size: 13 },
+  { dx: '4px', dy: '70px', delay: '90ms', size: 11 },
+];
+
+/** Renders the 0-100 hardness score as a short, human label. */
+function difficultyLabel(score?: number): { text: string; level: string } | null {
+  if (typeof score !== 'number') return null;
+  if (score >= 78) return { text: 'Expert', level: 'expert' };
+  if (score >= 58) return { text: 'Advanced', level: 'advanced' };
+  if (score >= 38) return { text: 'Intermediate', level: 'intermediate' };
+  return { text: 'Building', level: 'building' };
 }
 
 export const WordCardView: React.FC<WordCardViewProps> = ({
@@ -30,11 +48,23 @@ export const WordCardView: React.FC<WordCardViewProps> = ({
   isLearned,
   onToggleSave,
   onToggleLearned,
-  onNext,
 }) => {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isPlayingSentence, setIsPlayingSentence] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [burst, setBurst] = useState<{ id: number; label: string } | null>(null);
+
+  const lastTapRef = useRef(0);
+  const burstTimerRef = useRef<number | null>(null);
+
+  /** Shows the Instagram-style heart burst overlay. */
+  const triggerBurst = useCallback((label: string) => {
+    setBurst({ id: Date.now(), label });
+    if (burstTimerRef.current !== null) {
+      window.clearTimeout(burstTimerRef.current);
+    }
+    burstTimerRef.current = window.setTimeout(() => setBurst(null), 900);
+  }, []);
 
   const handlePlayWordAudio = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -60,14 +90,42 @@ Learned via Tamil-English Vocabulary Scroll!`;
       try {
         await navigator.clipboard.writeText(shareText);
         setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        window.setTimeout(() => setCopied(false), 2000);
       } catch (err) {
         console.warn('Clipboard write failed', err);
       }
     }
   };
 
-  // Helper to highlight the target word inside the example sentence
+  /**
+   * Double-tapping the card saves the word and fires the heart burst, matching
+   * the familiar "double tap to like" gesture. It is idempotent — tapping again
+   * re-animates instead of un-saving.
+   */
+  const handleCardTap = useCallback(() => {
+    const now = Date.now();
+    const isDoubleTap = now - lastTapRef.current < 320;
+    lastTapRef.current = isDoubleTap ? 0 : now;
+
+    if (!isDoubleTap) return;
+    if (!isSaved) onToggleSave(card.id);
+    triggerBurst('Saved');
+  }, [card.id, isSaved, onToggleSave, triggerBurst]);
+
+  const handleSaveClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const willSave = !isSaved;
+    onToggleSave(card.id);
+    triggerBurst(willSave ? 'Saved' : 'Removed');
+  };
+
+  const handleLearnedClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const willLearn = !isLearned;
+    onToggleLearned(card.id);
+    triggerBurst(willLearn ? 'Learned' : 'Reviewing');
+  };
+
   const highlightWordInSentence = (sentence: string, targetWord: string) => {
     if (!sentence) return '';
     const regex = new RegExp(`\\b(${targetWord}\\w*)\\b`, 'gi');
@@ -77,7 +135,7 @@ Learned via Tamil-English Vocabulary Scroll!`;
         {parts.map((part, index) => {
           if (part.toLowerCase().startsWith(targetWord.toLowerCase().slice(0, 4))) {
             return (
-              <span key={index} className="text-amber-300 font-bold underline decoration-amber-400/60 decoration-2 underline-offset-4">
+              <span key={index} className="brand-gradient-text font-bold">
                 {part}
               </span>
             );
@@ -88,244 +146,247 @@ Learned via Tamil-English Vocabulary Scroll!`;
     );
   };
 
-  return (
-    <div 
-      id={`word-card-${card.id}`}
-      className="relative w-full h-full max-w-lg mx-auto flex flex-col justify-between p-5 sm:p-7 select-none overflow-hidden"
-    >
-      {/* Dynamic atmospheric background glow */}
-      <div className="absolute inset-0 bg-radial from-amber-500/10 via-stone-900/50 to-stone-950 -z-10 pointer-events-none" />
-      <div className="absolute -top-24 -right-24 w-80 h-80 bg-rose-500/15 rounded-full blur-3xl pointer-events-none -z-10" />
-      <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none -z-10" />
+  const difficulty = difficultyLabel(card.difficulty);
 
-      {/* TOP HEADER: Category Pill & Badges */}
-      <div className="flex items-center justify-between gap-2 pt-2">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-white/10 text-stone-200 border border-white/15 backdrop-blur-md">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            {card.category}
-          </span>
-          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30">
-            {card.partOfSpeech}
-          </span>
-          {card.audioUrl && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-              <Volume2 className="w-3 h-3 text-emerald-400" />
-              <span>Studio Audio</span>
+  return (
+    <div className="relative w-full h-full max-w-lg mx-auto flex flex-col px-4 sm:px-6 pt-2 pb-16 select-none overflow-hidden">
+      {/* Soft blue-pink wash behind the card */}
+      <div
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-[min(440px,100%)] h-[300px] rounded-full blur-3xl opacity-[0.18] -z-10 pointer-events-none"
+        style={{ backgroundImage: 'linear-gradient(135deg, #3B82F6 0%, #EC4899 100%)' }}
+      />
+
+      {/* THE WORD CARD */}
+      <div
+        id={`word-card-${card.id}`}
+        onClick={handleCardTap}
+        className="gradient-ring gradient-glow relative flex-1 min-h-0 flex flex-col rounded-[20px] bg-white overflow-hidden"
+      >
+        {/* ---- Double-tap burst overlay (Instagram-style) ---- */}
+        {burst && (
+          <div
+            key={burst.id}
+            className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none"
+          >
+            <div className="relative flex items-center justify-center">
+              <div
+                className="animate-burst flex items-center justify-center w-24 h-24 rounded-full shadow-2xl"
+                style={{ backgroundImage: 'linear-gradient(135deg, #3B82F6 0%, #8B5CF6 45%, #EC4899 100%)' }}
+              >
+                <Heart className="w-11 h-11 text-white fill-white" strokeWidth={1.5} />
+              </div>
+
+              {SPARKLES.map((s, i) => (
+                <span
+                  key={i}
+                  className="animate-sparkle absolute"
+                  style={
+                    {
+                      '--dx': s.dx,
+                      '--dy': s.dy,
+                      animationDelay: s.delay,
+                    } as React.CSSProperties
+                  }
+                >
+                  <Sparkles
+                    style={{ width: s.size, height: s.size }}
+                    className="text-[#EC4899] fill-[#EC4899]"
+                    strokeWidth={1.5}
+                  />
+                </span>
+              ))}
+
+              <span className="animate-burst absolute -bottom-12 whitespace-nowrap text-xs font-bold tracking-wide uppercase brand-gradient-text">
+                {burst.label}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ---- Card body scrolls internally if taller than the reel page ---- */}
+        <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-5 sm:p-6 flex flex-col gap-4">
+          {/* Header: category, part of speech, difficulty */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wider brand-gradient-soft text-[#2563EB] border border-[#DCE7FF]">
+              <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} />
+              {card.category}
             </span>
+
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium bg-[#F8F7FF] text-[#6B7280] border border-[#ECE9F6] capitalize">
+              {card.partOfSpeech}
+            </span>
+
+            {difficulty && (
+              <span
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-white"
+                style={{ backgroundImage: 'linear-gradient(135deg, #3B82F6 0%, #EC4899 100%)' }}
+                title={`Hardness score ${card.difficulty}/100`}
+              >
+                <Gauge className="w-3.5 h-3.5" strokeWidth={1.75} />
+                {difficulty.text}
+              </span>
+            )}
+          </div>
+
+          {/* The English word */}
+          <div className="mt-1">
+            <div className="flex items-start gap-3">
+              <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-[#1A1A2E] leading-tight">
+                {card.word}
+              </h1>
+              <button
+                id={`btn-pronounce-${card.id}`}
+                onClick={handlePlayWordAudio}
+                title="Hear pronunciation"
+                className={`mt-1 p-2.5 rounded-full transition-all duration-200 border ${
+                  isPlayingAudio
+                    ? 'brand-gradient text-white border-transparent scale-110'
+                    : 'bg-[#FAFAFA] text-[#6B7280] border-[#ECE9F6] hover:text-[#2563EB]'
+                }`}
+              >
+                <Volume2 className="w-5 h-5" strokeWidth={1.75} />
+              </button>
+            </div>
+
+            {card.phonetic && (
+              <p className="mt-1 text-sm font-mono text-[#6B7280]">{card.phonetic}</p>
+            )}
+
+            {/* Tamil meaning — the visual pop */}
+            <div className="mt-3 flex items-baseline gap-2 flex-wrap">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#EC4899] bg-[#FFF0F7] px-2 py-0.5 rounded">
+                பொருள்
+              </span>
+              <p className="text-2xl sm:text-[28px] font-bold text-[#EC4899] leading-snug">
+                {card.tamilMeaning}
+              </p>
+            </div>
+          </div>
+
+          {/* Definition */}
+          {card.englishDefinition && (
+            <div className="border-l-2 border-[#ECE9F6] pl-3">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">
+                Meaning
+              </span>
+              <p className="text-[15px] text-[#4B5563] leading-relaxed mt-0.5">
+                {card.englishDefinition}
+              </p>
+            </div>
           )}
-          {card.dictionarySource && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-300 border border-blue-500/30">
-              <span>Dict API</span>
-            </span>
-          )}
-          {card.source === 'gemini-realtime' && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm animate-pulse">
-              <Zap className="w-3 h-3 text-purple-400 fill-purple-400" />
-              <span>Real-time AI</span>
-            </span>
+
+          {/* Bilingual example */}
+          <div className="rounded-[16px] bg-[#F8F7FF] border border-[#ECE9F6] p-4">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">
+                <Languages className="w-3.5 h-3.5" strokeWidth={1.75} />
+                In context
+              </span>
+              <button
+                id={`btn-sentence-audio-${card.id}`}
+                onClick={handlePlaySentenceAudio}
+                title="Listen to the sentence"
+                className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-white text-[#6B7280] border border-[#ECE9F6] hover:text-[#2563EB] transition-colors"
+              >
+                <Volume2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                Listen
+              </button>
+            </div>
+
+            <p className="text-[15px] text-[#6B7280] leading-relaxed">
+              “{highlightWordInSentence(card.englishSentence, card.word)}”
+            </p>
+
+            {card.tamilSentence && (
+              <>
+                <div className="h-px w-full bg-[#ECE9F6] my-3" />
+                <p className="text-sm text-[#6B7280] leading-relaxed">{card.tamilSentence}</p>
+              </>
+            )}
+          </div>
+
+          {/* Synonyms */}
+          {card.synonyms && card.synonyms.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">
+                Similar
+              </span>
+              {card.synonyms.slice(0, 3).map((syn, idx) => (
+                <span
+                  key={idx}
+                  className="text-xs px-2.5 py-1 rounded-full bg-[#F8F7FF] text-[#4B5563] border border-[#ECE9F6]"
+                >
+                  {syn}
+                </span>
+              ))}
+            </div>
           )}
         </div>
 
-        {card.phonetic && (
-          <span className="text-xs tracking-wide text-stone-400 font-mono bg-stone-800/60 px-2.5 py-1 rounded-md border border-stone-700/50">
-            {card.phonetic}
-          </span>
-        )}
-      </div>
-
-      {/* MAIN CENTER CONTENT: Word, Tamil Meaning, Definition, Bilingual Context */}
-      <div className="my-auto py-4 flex flex-col gap-4">
-        {/* Main English Word and Quick Audio */}
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-white drop-shadow-sm font-sans">
-              {card.word}
-            </h1>
+        {/* ---- Action bar ---- */}
+        <div className="shrink-0 border-t border-[#ECE9F6] bg-white/95 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            {/* Save / Bookmark */}
             <button
-              id={`btn-pronounce-${card.id}`}
-              onClick={handlePlayWordAudio}
-              title="Pronounce English Word"
-              className={`p-3 rounded-full transition-all duration-200 border ${
-                isPlayingAudio 
-                  ? 'bg-amber-500 text-stone-950 scale-110 shadow-lg shadow-amber-500/30 border-amber-400' 
-                  : 'bg-white/10 text-stone-200 hover:bg-white/20 hover:text-white border-white/15'
+              id={`btn-bookmark-${card.id}`}
+              onClick={handleSaveClick}
+              title={isSaved ? 'Remove bookmark' : 'Save word'}
+              className={`p-2.5 rounded-full border transition-all duration-200 active:scale-90 ${
+                isSaved
+                  ? 'brand-gradient text-white border-transparent scale-105'
+                  : 'bg-[#FAFAFA] text-[#6B7280] border-[#ECE9F6] hover:text-[#EC4899]'
               }`}
             >
-              <Volume2 className={`w-5 h-5 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+              <Bookmark
+                className="w-5 h-5"
+                strokeWidth={1.75}
+                fill={isSaved ? 'currentColor' : 'none'}
+              />
             </button>
-          </div>
 
-          {/* Tamil Meaning (பொருள்) in prominent, elegant typography */}
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-amber-400/90 font-mono bg-amber-400/10 px-2 py-0.5 rounded">
-              பொருள்
-            </span>
-            <p className="text-2xl sm:text-3xl font-bold text-amber-300 drop-shadow leading-snug">
-              {card.tamilMeaning}
-            </p>
-          </div>
-        </div>
-
-        {/* English Definition */}
-        {card.englishDefinition && (
-          <div className="bg-stone-900/60 backdrop-blur-sm p-3.5 rounded-xl border border-stone-800 text-stone-300 text-sm leading-relaxed">
-            <p className="text-stone-400 text-xs font-medium uppercase tracking-wider mb-1 flex items-center gap-1.5">
-              <BookOpen className="w-3.5 h-3.5 text-stone-400" />
-              English Meaning
-            </p>
-            <p>{card.englishDefinition}</p>
-          </div>
-        )}
-
-        {/* Dual-language Example Sentence Card */}
-        <div className="relative rounded-2xl bg-gradient-to-b from-stone-900/90 to-stone-900/60 backdrop-blur-md p-4 sm:p-5 border border-stone-700/60 shadow-xl">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 uppercase tracking-wider">
-              <Languages className="w-4 h-4 text-emerald-400" />
-              Example in Context
-            </div>
+            {/* Learned */}
             <button
-              id={`btn-sentence-audio-${card.id}`}
-              onClick={handlePlaySentenceAudio}
-              title="Listen to full sentence"
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white border border-stone-700 transition-colors"
+              id={`btn-learned-${card.id}`}
+              onClick={handleLearnedClick}
+              title={isLearned ? 'Mark as still reviewing' : 'Mark as learned'}
+              className={`p-2.5 rounded-full border transition-all duration-200 active:scale-90 ${
+                isLearned
+                  ? 'brand-gradient text-white border-transparent scale-105'
+                  : 'bg-[#FAFAFA] text-[#6B7280] border-[#ECE9F6] hover:text-[#2563EB]'
+              }`}
             >
-              <Volume2 className={`w-3.5 h-3.5 ${isPlayingSentence ? 'text-amber-400 animate-pulse' : ''}`} />
-              <span>Listen</span>
+              <CheckCircle2
+                className="w-5 h-5"
+                strokeWidth={1.75}
+                fill={isLearned ? 'currentColor' : 'none'}
+              />
+            </button>
+
+            {/* Share / copy */}
+            <button
+              id={`btn-share-${card.id}`}
+              onClick={handleShare}
+              title="Share this word"
+              className={`p-2.5 rounded-full border transition-all duration-200 active:scale-90 ${
+                copied
+                  ? 'brand-gradient text-white border-transparent'
+                  : 'bg-[#FAFAFA] text-[#6B7280] border-[#ECE9F6] hover:text-[#2563EB]'
+              }`}
+            >
+              {copied ? (
+                <Check className="w-5 h-5" strokeWidth={1.75} />
+              ) : (
+                <Share2 className="w-5 h-5" strokeWidth={1.75} />
+              )}
             </button>
           </div>
 
-          {/* English Context Sentence */}
-          <p className="text-base sm:text-lg text-stone-100 font-medium leading-relaxed mb-3">
-            "{highlightWordInSentence(card.englishSentence, card.word)}"
-          </p>
-
-          {/* Divider */}
-          <div className="h-px w-full bg-stone-800 my-2.5" />
-
-          {/* Tamil Context Sentence */}
-          <div>
-            <span className="text-xs font-semibold text-teal-400/90 tracking-wide font-mono block mb-1">
-              தமிழ் வடிவம் (Tamil Translation):
-            </span>
-            <p className="text-stone-200 text-sm sm:text-base font-normal leading-relaxed">
-              "{card.tamilSentence}"
-            </p>
-          </div>
         </div>
-
-        {/* Synonyms & Antonyms from Free Dictionary API */}
-        {((card.synonyms && card.synonyms.length > 0) || (card.antonyms && card.antonyms.length > 0)) && (
-          <div className="flex flex-col gap-1.5 text-xs text-stone-400">
-            {card.synonyms && card.synonyms.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-stone-500 uppercase tracking-wider text-[10px]">Synonyms:</span>
-                {card.synonyms.slice(0, 3).map((syn, idx) => (
-                  <span key={idx} className="bg-stone-800/80 px-2 py-0.5 rounded text-stone-300 border border-stone-700/50">
-                    {syn}
-                  </span>
-                ))}
-              </div>
-            )}
-            {card.antonyms && card.antonyms.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-rose-400/80 uppercase tracking-wider text-[10px]">Opposites:</span>
-                {card.antonyms.slice(0, 3).map((ant, idx) => (
-                  <span key={idx} className="bg-rose-950/40 px-2 py-0.5 rounded text-rose-300/90 border border-rose-800/40">
-                    {ant}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* RIGHT SIDE FLOATING ACTION BAR (TikTok / Reels Style) */}
-      <div className="absolute right-4 bottom-24 flex flex-col items-center gap-4 z-20">
-        {/* Bookmark / Save */}
-        <button
-          id={`btn-bookmark-${card.id}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleSave(card.id);
-          }}
-          className="group flex flex-col items-center gap-1"
-          title={isSaved ? 'Remove Bookmark' : 'Save / Bookmark Word'}
-        >
-          <div className={`p-3 rounded-full transition-all duration-200 border backdrop-blur-md ${
-            isSaved
-              ? 'bg-rose-500 text-white border-rose-400 shadow-lg shadow-rose-500/40 scale-110'
-              : 'bg-stone-900/80 text-stone-300 hover:text-white hover:bg-stone-800 border-stone-700/70'
-          }`}>
-            <Bookmark className={`w-5 h-5 ${isSaved ? 'fill-current' : ''}`} />
-          </div>
-          <span className="text-[11px] font-medium text-stone-300 drop-shadow">
-            {isSaved ? 'Saved' : 'Save'}
-          </span>
-        </button>
-
-        {/* Mark as Learned */}
-        <button
-          id={`btn-learned-${card.id}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleLearned(card.id);
-          }}
-          className="group flex flex-col items-center gap-1"
-          title={isLearned ? 'Mark as reviewing' : 'Mark as learned'}
-        >
-          <div className={`p-3 rounded-full transition-all duration-200 border backdrop-blur-md ${
-            isLearned
-              ? 'bg-emerald-500 text-white border-emerald-400 shadow-lg shadow-emerald-500/40 scale-110'
-              : 'bg-stone-900/80 text-stone-300 hover:text-white hover:bg-stone-800 border-stone-700/70'
-          }`}>
-            <CheckCircle2 className={`w-5 h-5 ${isLearned ? 'fill-emerald-950' : ''}`} />
-          </div>
-          <span className="text-[11px] font-medium text-stone-300 drop-shadow">
-            {isLearned ? 'Learned' : 'Done'}
-          </span>
-        </button>
-
-        {/* Share / Copy */}
-        <button
-          id={`btn-share-${card.id}`}
-          onClick={handleShare}
-          className="group flex flex-col items-center gap-1"
-          title="Share or Copy Word"
-        >
-          <div className={`p-3 rounded-full transition-all duration-200 border backdrop-blur-md ${
-            copied
-              ? 'bg-emerald-600 text-white border-emerald-500'
-              : 'bg-stone-900/80 text-stone-300 hover:text-white hover:bg-stone-800 border-stone-700/70'
-          }`}>
-            {copied ? <Check className="w-5 h-5" /> : <Share2 className="w-5 h-5" />}
-          </div>
-          <span className="text-[11px] font-medium text-stone-300 drop-shadow">
-            {copied ? 'Copied!' : 'Share'}
-          </span>
-        </button>
-      </div>
-
-      {/* BOTTOM FOOTER: Gesture cue / Next button */}
-      <div className="pt-2 flex items-center justify-between text-xs text-stone-400">
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>Swipe up or click below for next word</span>
-        </div>
-
-        {onNext && (
-          <button
-            id={`btn-next-inline-${card.id}`}
-            onClick={onNext}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-colors font-medium text-xs"
-          >
-            <span>Next (அடுத்த சொல்)</span>
-            <ArrowDown className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
+      <p className="shrink-0 text-center text-[11px] text-[#6B7280] pt-2">
+        Scroll for the next word · double-tap the card to save
+      </p>
     </div>
   );
 };

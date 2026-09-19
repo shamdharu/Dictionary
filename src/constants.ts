@@ -1,162 +1,52 @@
-import { CategoryMeta, WordCard } from './types';
+import { CategoryMeta } from './types';
 
-export const CATEGORIES: CategoryMeta[] = [
-  { id: 'all', labelEn: 'All Words', labelTa: 'அனைத்தும்', icon: 'Sparkles', gradient: 'from-amber-500 to-orange-500', cardBg: 'bg-stone-900' },
-  { id: 'greetings', labelEn: 'Greetings', labelTa: 'வாழ்த்துகள்', icon: 'Hand', gradient: 'from-rose-500 to-orange-500', cardBg: 'bg-stone-900' },
-  { id: 'emotions', labelEn: 'Emotions', labelTa: 'உணர்வுகள்', icon: 'Smile', gradient: 'from-pink-500 to-rose-500', cardBg: 'bg-stone-900' },
-  { id: 'food', labelEn: 'Food & Dining', labelTa: 'உணவு', icon: 'Utensils', gradient: 'from-amber-500 to-yellow-500', cardBg: 'bg-stone-900' },
-  { id: 'work', labelEn: 'Work & Office', labelTa: 'பணி & அலுவலகம்', icon: 'Briefcase', gradient: 'from-blue-500 to-indigo-500', cardBg: 'bg-stone-900' },
-  { id: 'travel', labelEn: 'Travel', labelTa: 'பயணம்', icon: 'Plane', gradient: 'from-emerald-500 to-teal-500', cardBg: 'bg-stone-900' },
-  { id: 'weather', labelEn: 'Weather', labelTa: 'வானிலை', icon: 'CloudRain', gradient: 'from-cyan-500 to-blue-500', cardBg: 'bg-stone-900' },
-  { id: 'family', labelEn: 'Family', labelTa: 'குடும்பம்', icon: 'Users', gradient: 'from-purple-500 to-indigo-500', cardBg: 'bg-stone-900' },
-  { id: 'daily routine', labelEn: 'Daily Routine', labelTa: 'அன்றாட பழக்கம்', icon: 'Clock', gradient: 'from-orange-500 to-amber-500', cardBg: 'bg-stone-900' },
-  { id: 'health', labelEn: 'Health & Fitness', labelTa: 'உடல்நலம்', icon: 'Activity', gradient: 'from-teal-500 to-emerald-500', cardBg: 'bg-stone-900' },
-  { id: 'shopping', labelEn: 'Shopping', labelTa: 'வாங்குதல் & செலவு', icon: 'ShoppingBag', gradient: 'from-violet-500 to-purple-500', cardBg: 'bg-stone-900' },
-];
-
-export const CATEGORY_TOPIC_WORDS: Record<string, string[]> = {
-  greetings: ['welcome', 'cordial', 'salute', 'embrace', 'reception', 'compliment', 'respectful', 'courtesy', 'hospitality', 'farewell'],
-  emotions: ['cheerful', 'delighted', 'furious', 'serene', 'optimistic', 'melancholy', 'anxious', 'compassion', 'generous', 'patient'],
-  food: ['flavor', 'delicious', 'aroma', 'nourish', 'appetite', 'crispy', 'savory', 'refreshing', 'nutrition', 'spicy'],
-  work: ['efficient', 'collaborate', 'punctual', 'deadline', 'initiative', 'schedule', 'productive', 'diligent', 'responsibility'],
-  travel: ['journey', 'destination', 'itinerary', 'voyage', 'passenger', 'scenic', 'explore', 'expedition', 'departure', 'arrival'],
-  weather: ['breeze', 'monsoon', 'scorching', 'chilly', 'humidity', 'forecast', 'downpour', 'blizzard', 'climate'],
-  family: ['harmony', 'kinship', 'affection', 'sibling', 'companion', 'guidance', 'heritage', 'bond', 'relative'],
-  'daily routine': ['routine', 'organize', 'habitual', 'punctual', 'exercise', 'chore', 'discipline', 'restful', 'grocery'],
-  health: ['wellness', 'immunity', 'remedy', 'vitality', 'hygiene', 'fitness', 'nutrition', 'recovery', 'prescription'],
-  shopping: ['purchase', 'discount', 'bargain', 'expense', 'affordable', 'receipt', 'warranty', 'retail', 'savings'],
+/**
+ * Brand palette — a blue -> pink/magenta gradient inspired by Instagram's
+ * aesthetic, replacing the usual orange/purple mix.
+ */
+export const BRAND = {
+  blue: '#3B82F6',
+  blueDeep: '#2563EB',
+  pink: '#EC4899',
+  pinkBright: '#FF4F9A',
+  ink: '#1A1A2E',
+  muted: '#6B7280',
+  surface: '#FAFAFA',
+  surfaceAlt: '#F8F7FF',
+  border: '#ECE9F6',
 };
 
-export const DEFAULT_STARTER_CARDS: WordCard[] = [
-  {
-    id: 'welcome',
-    word: 'Welcome',
-    tamilMeaning: 'நல்வரவு / வரவேற்பு',
-    partOfSpeech: 'noun',
-    phonetic: '/ˈwel.kəm/',
-    englishDefinition: 'An instance or manner of greeting someone gladly on arrival.',
-    englishSentence: 'They gave the new guests a warm and traditional welcome with flowers.',
-    tamilSentence: 'புதிய விருந்தினர்களுக்கு மலர்கள் கொடுத்து அன்பான வரவேற்பை அளித்தனர்.',
-    category: 'greetings',
-    synonyms: ['greeting', 'reception', 'hospitality'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'resilience',
-    word: 'Resilience',
-    tamilMeaning: 'மீண்டு எழும் திறன் / சவால்களை தாங்கும் வலிமை',
-    partOfSpeech: 'noun',
-    phonetic: '/rɪˈzɪl.jəns/',
-    englishDefinition: 'The capacity to recover quickly from difficulties; toughness.',
-    englishSentence: 'Her quiet resilience throughout the crisis inspired everyone on the team.',
-    tamilSentence: 'சவால்களின் போது அவர் காட்டிய மன உறுதி குழுவில் உள்ள அனைவரையும் ஊக்கப்படுத்தியது.',
-    category: 'emotions',
-    synonyms: ['fortitude', 'endurance', 'toughness'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'flavor',
-    word: 'Flavor',
-    tamilMeaning: 'சுவை / தனித்துவமான மணம்',
-    partOfSpeech: 'noun',
-    phonetic: '/ˈfleɪ.vər/',
-    englishDefinition: 'The distinctive taste of a food or drink.',
-    englishSentence: 'Fresh cardamom gives a rich and unforgettable flavor to sweet pongal.',
-    tamilSentence: 'சர்க்கரைப் பொங்கலுக்கு ஏலக்காய் ஒரு சிறந்த சுவையையும் நறுமணத்தையும் தருகிறது.',
-    category: 'food',
-    synonyms: ['taste', 'savor', 'tang'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'efficient',
-    word: 'Efficient',
-    tamilMeaning: 'திறமையான / நேரம் விரயமின்றி செயல்படும்',
-    partOfSpeech: 'adjective',
-    phonetic: '/ɪˈfɪʃ.ənt/',
-    englishDefinition: 'Achieving maximum productivity with minimum wasted effort or expense.',
-    englishSentence: 'Using keyboard shortcuts makes your daily computer work much more efficient.',
-    tamilSentence: 'விசைப்பலகை குறுக்குவழிகளைப் பயன்படுத்துவது உங்கள் கணினிப் பணியை மிகவும் திறமையானதாக்குகிறது.',
-    category: 'work',
-    synonyms: ['productive', 'capable', 'competent'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'scenic',
-    word: 'Scenic',
-    tamilMeaning: 'இயற்கை எழில் கொஞ்சும் / கண்ணைக் கவரும்',
-    partOfSpeech: 'adjective',
-    phonetic: '/ˈsiː.nɪk/',
-    englishDefinition: 'Providing or relating to views of impressive or beautiful natural scenery.',
-    englishSentence: 'The train journey to Kodaikanal offers breathtaking scenic mountain views.',
-    tamilSentence: 'கொடைக்கானலுக்கான ரயில் பயணம் கண்கவர் இயற்கை எழில் கொஞ்சும் மலைக் காட்சிகளை வழங்குகிறது.',
-    category: 'travel',
-    synonyms: ['picturesque', 'breathtaking', 'panoramic'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'punctual',
-    word: 'Punctual',
-    tamilMeaning: 'நேரந்தவறாமை கொண்ட / குறித்த நேரத்தில் இருக்கும்',
-    partOfSpeech: 'adjective',
-    phonetic: '/ˈpʌŋk.tʃu.əl/',
-    englishDefinition: 'Happening or doing something at the agreed or proper time.',
-    englishSentence: 'Being punctual to meetings demonstrates professionalism and mutual respect.',
-    tamilSentence: 'கூட்டங்களுக்கு குறித்த நேரத்தில் வருவது தொழில்முறையையும் பிறர் மீதான மரியாதையையும் வெளிப்படுத்துகிறது.',
-    category: 'daily routine',
-    synonyms: ['on time', 'prompt', 'timely'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'wellness',
-    word: 'Wellness',
-    tamilMeaning: 'முழு நல்வாழ்வு / ஆரோக்கியமான நிலை',
-    partOfSpeech: 'noun',
-    phonetic: '/ˈwel.nəs/',
-    englishDefinition: 'The state of being in good health, especially as an actively pursued goal.',
-    englishSentence: 'Daily yoga and meditation promote both mental peace and physical wellness.',
-    tamilSentence: 'தினசரி யோகாவும் தியானமும் மன அமைதியையும் உடல் நல்வாழ்வையும் மேம்படுத்துகின்றன.',
-    category: 'health',
-    synonyms: ['well-being', 'health', 'vitality'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'discount',
-    word: 'Discount',
-    tamilMeaning: 'தள்ளுபடி / விலை குறைப்பு',
-    partOfSpeech: 'noun',
-    phonetic: '/ˈdɪs.kaʊnt/',
-    englishDefinition: 'A deduction from the usual cost of something.',
-    englishSentence: 'The store offered an attractive festival discount on traditional festive clothes.',
-    tamilSentence: 'அந்த ஆடைக் கடை பண்டிகைக் காலத்திற்கான கவர்ச்சிகரமான தள்ளுபடியை வழங்கியது.',
-    category: 'shopping',
-    synonyms: ['reduction', 'markdown', 'rebate'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'monsoon',
-    word: 'Monsoon',
-    tamilMeaning: 'பருவமழை / பருவக்காற்று',
-    partOfSpeech: 'noun',
-    phonetic: '/mɒnˈsuːn/',
-    englishDefinition: 'A seasonal prevailing wind in South Asia, bringing essential seasonal rain.',
-    englishSentence: 'The northeast monsoon brings welcome rainfall across the fertile plains.',
-    tamilSentence: 'வடகிழக்குப் பருவமழை சமவெளிப் பகுதிகளில் அவசியமான மழையைக் கொண்டுவருகிறது.',
-    category: 'weather',
-    synonyms: ['rainy season', 'downpour', 'deluge'],
-    source: 'verified-starter',
-  },
-  {
-    id: 'harmony',
-    word: 'Harmony',
-    tamilMeaning: 'நல்லிணக்கம் / ஒற்றுமை',
-    partOfSpeech: 'noun',
-    phonetic: '/ˈhɑː.mə.ni/',
-    englishDefinition: 'Agreement or concord; peaceful and supportive coexistence.',
-    englishSentence: 'People of diverse backgrounds live together in complete peace and harmony here.',
-    tamilSentence: 'பல்வேறு பின்னணிகளைக் கொண்ட மக்கள் இங்கு முழு அமைதியுடனும் நல்லிணக்கத்துடனும் வாழ்கின்றனர்.',
-    category: 'family',
-    synonyms: ['unity', 'peace', 'accord'],
-    source: 'verified-starter',
-  },
-];
+/** Shared gradient used for accents, active states and progress bars. */
+export const BRAND_GRADIENT = `linear-gradient(135deg, ${BRAND.blue} 0%, #8B5CF6 45%, ${BRAND.pink} 100%)`;
 
+/** Human-readable label for a category id (falls back to the raw value). */
+export function getCategoryLabel(categoryId: string): string {
+  const bucket = CATEGORIES.find((c) => c.id === categoryId);
+  return bucket ? bucket.labelEn : categoryId;
+}
+
+/**
+ * Purely presentational metadata for the topic chips.
+ *
+ * No English vocabulary is declared here — every word is discovered live at
+ * request time by the server (see src/server/wordSource.ts). Only the subject
+ * of each bucket lives in this file.
+ */
+export const CATEGORIES: CategoryMeta[] = [
+  { id: 'all', labelEn: 'All Words', labelTa: 'அனைத்தும்', icon: 'Sparkles', gradient: '', cardBg: '' },
+  { id: 'emotions', labelEn: 'Emotions', labelTa: 'உணர்வுகள்', icon: 'Smile', gradient: '', cardBg: '' },
+  { id: 'work', labelEn: 'Work', labelTa: 'பணி', icon: 'Briefcase', gradient: '', cardBg: '' },
+  { id: 'travel', labelEn: 'Travel', labelTa: 'பயணம்', icon: 'Plane', gradient: '', cardBg: '' },
+  { id: 'weather', labelEn: 'Weather', labelTa: 'வானிலை', icon: 'CloudRain', gradient: '', cardBg: '' },
+  { id: 'food', labelEn: 'Food', labelTa: 'உணவு', icon: 'Utensils', gradient: '', cardBg: '' },
+  { id: 'health', labelEn: 'Health', labelTa: 'உடல்நலம்', icon: 'Activity', gradient: '', cardBg: '' },
+  { id: 'family', labelEn: 'Family', labelTa: 'குடும்பம்', icon: 'Users', gradient: '', cardBg: '' },
+  { id: 'daily routine', labelEn: 'Routine', labelTa: 'அன்றாடம்', icon: 'Clock', gradient: '', cardBg: '' },
+  { id: 'shopping', labelEn: 'Shopping', labelTa: 'வாங்குதல்', icon: 'ShoppingBag', gradient: '', cardBg: '' },
+  { id: 'greetings', labelEn: 'Greetings', labelTa: 'வாழ்த்துகள்', icon: 'Hand', gradient: '', cardBg: '' },
+  { id: 'study', labelEn: 'Study', labelTa: 'கல்வி', icon: 'GraduationCap', gradient: '', cardBg: '' },
+  { id: 'society', labelEn: 'Society', labelTa: 'சமூகம்', icon: 'Globe', gradient: '', cardBg: '' },
+  { id: 'nature', labelEn: 'Nature', labelTa: 'இயற்கை', icon: 'Leaf', gradient: '', cardBg: '' },
+  { id: 'money', labelEn: 'Money', labelTa: 'பணம்', icon: 'Coins', gradient: '', cardBg: '' },
+  { id: 'technology', labelEn: 'Tech', labelTa: 'தொழில்நுட்பம்', icon: 'Cpu', gradient: '', cardBg: '' },
+];

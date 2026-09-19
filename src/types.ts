@@ -1,15 +1,20 @@
-export type CategoryType = 
+export type CategoryType =
   | 'all'
-  | 'greetings'
   | 'emotions'
-  | 'food'
   | 'work'
   | 'travel'
   | 'weather'
+  | 'food'
+  | 'health'
   | 'family'
   | 'daily routine'
-  | 'health'
-  | 'shopping';
+  | 'shopping'
+  | 'greetings'
+  | 'study'
+  | 'society'
+  | 'nature'
+  | 'money'
+  | 'technology';
 
 export interface WordCard {
   id: string;
@@ -22,6 +27,8 @@ export interface WordCard {
   tamilSentence: string;
   category: CategoryType | string;
   colorTheme?: string;
+  /** 0-100 hardness score computed live from corpus rarity + morphology. */
+  difficulty?: number;
   synonyms?: string[];
   antonyms?: string[];
   audioUrl?: string;

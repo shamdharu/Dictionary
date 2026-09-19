@@ -3,209 +3,178 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { WordCard, CategoryType, TabType, UserProgress } from './types';
-import { DEFAULT_STARTER_CARDS, CATEGORY_TOPIC_WORDS } from './constants';
-import { lookupDictionaryWord } from './utils/dictionaryApi';
-import { 
-  getInitialProgress, 
-  saveProgress, 
-  getCachedCustomCards, 
-  saveCachedCustomCards,
+import { requestRealtimeWords } from './utils/wordApi';
+import {
+  getInitialProgress,
+  saveProgress,
+  getCachedCards,
+  saveCachedCards,
   getSeenWordIds,
-  addSeenWordIds
+  addSeenWordIds,
 } from './utils/storage';
 import { FeedView } from './components/FeedView';
 import { SavedWordsView } from './components/SavedWordsView';
 import { ProgressStatsView } from './components/ProgressStatsView';
 import { BottomNavigation } from './components/BottomNavigation';
 
+/** How many live words to request per batch. */
+const BATCH_SIZE = 4;
+/** Start the very first batch a little larger for a smooth first session. */
+const INITIAL_BATCH_SIZE = 6;
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('feed');
   const [selectedCategory, setSelectedCategory] = useState<CategoryType>('all');
-  const [isFetchingRealtime, setIsFetchingRealtime] = useState(false);
-  const [cards, setCards] = useState<WordCard[]>(() => {
-    const cached = getCachedCustomCards();
-    if (cached && cached.length > 0) return cached;
-    return DEFAULT_STARTER_CARDS;
-  });
-
+  const [isLoadingWords, setIsLoadingWords] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [cards, setCards] = useState<WordCard[]>([]);
   const [progress, setProgress] = useState<UserProgress>(getInitialProgress);
+
+  /** Tracks which category the currently displayed cards belong to. */
+  const loadedCategoryRef = useRef<string>('');
+  /** Guards against overlapping batches. */
+  const inFlightRef = useRef(false);
 
   // Sync progress to localStorage
   useEffect(() => {
     saveProgress(progress);
   }, [progress]);
 
-  // Real-time batch fetching function from Gemini Flash backend with browser Free Dictionary fallback
-  const fetchRealtimeBatch = async (category: string = 'all', count: number = 3, prepend: boolean = false): Promise<WordCard[]> => {
-    setIsFetchingRealtime(true);
-    try {
-      const seen = getSeenWordIds();
-      const res = await fetch('/api/realtime-words', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category,
-          count,
-          excludeWords: seen,
-        }),
-      });
+  /**
+   * Pulls a fresh batch of live words. Nothing is hardcoded — the server
+   * discovers them on demand from public dictionary data.
+   */
+  const loadWords = useCallback(
+    async (category: string, count: number, replace: boolean) => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      setIsLoadingWords(true);
+      setLoadError(null);
 
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.words) && data.words.length > 0) {
-          const freshWords: WordCard[] = data.words;
-          addSeenWordIds(freshWords.map(w => w.id));
+      try {
+        const excludeWords = replace
+          ? []
+          : Array.from(
+              new Set([...getSeenWordIds(), ...cards.map((c) => c.id.toLowerCase())])
+            ).slice(-200);
 
-          setCards(prev => {
-            const existingIds = new Set(prev.map(c => c.id.toLowerCase()));
-            const nonDuplicateWords = freshWords.filter(nw => !existingIds.has(nw.id.toLowerCase()));
-            if (nonDuplicateWords.length === 0) return prev;
+        const fresh = await requestRealtimeWords({ category, count, excludeWords });
 
-            const updated = prepend ? [...nonDuplicateWords, ...prev] : [...prev, ...nonDuplicateWords];
-            saveCachedCustomCards(updated);
-            return updated;
-          });
-
-          return freshWords;
+        if (fresh.length === 0) {
+          if (replace && cards.length === 0) {
+            setLoadError('Could not reach the live vocabulary sources.');
+          }
+          return;
         }
-      }
-      
-      // Fallback for static hosts (e.g. Vercel without serverless) or offline API
-      return await fetchClientSideSeedBatch(category, count, prepend);
-    } catch (err) {
-      console.warn('Backend unavailable, falling back to client-side Free Dictionary lookup:', err);
-      return await fetchClientSideSeedBatch(category, count, prepend);
-    } finally {
-      setIsFetchingRealtime(false);
-    }
-  };
 
-  // Client-side dictionary batch loader
-  const fetchClientSideSeedBatch = async (category: string, count: number, prepend: boolean): Promise<WordCard[]> => {
-    try {
-      const seedPool = (category !== 'all' && CATEGORY_TOPIC_WORDS[category])
-        ? CATEGORY_TOPIC_WORDS[category]
-        : Object.values(CATEGORY_TOPIC_WORDS).flat();
+        addSeenWordIds(fresh.map((w) => w.id));
 
-      const seen = getSeenWordIds();
-      const existingIds = new Set(cards.map(c => c.id.toLowerCase()));
-      const available = seedPool.filter(w => !seen.includes(w.toLowerCase()) && !existingIds.has(w.toLowerCase()));
-      const wordsToFetch = (available.length >= count ? available : seedPool)
-        .sort(() => 0.5 - Math.random())
-        .slice(0, count);
-
-      const fetchedCards: WordCard[] = [];
-      for (const w of wordsToFetch) {
-        const card = await lookupDictionaryWord(w, category !== 'all' ? category : 'daily routine');
-        if (card) fetchedCards.push(card);
-      }
-
-      if (fetchedCards.length > 0) {
-        addSeenWordIds(fetchedCards.map(w => w.id));
-        setCards(prev => {
-          const prevIds = new Set(prev.map(c => c.id.toLowerCase()));
-          const nonDup = fetchedCards.filter(c => !prevIds.has(c.id.toLowerCase()));
-          if (nonDup.length === 0) return prev;
-          const updated = prepend ? [...nonDup, ...prev] : [...prev, ...nonDup];
-          saveCachedCustomCards(updated);
-          return updated;
+        setCards((prev) => {
+          const next = replace ? fresh : [...prev, ...fresh];
+          const deduped: WordCard[] = [];
+          const ids = new Set<string>();
+          for (const card of next) {
+            const key = card.id.toLowerCase();
+            if (ids.has(key)) continue;
+            ids.add(key);
+            deduped.push(card);
+          }
+          saveCachedCards(category, deduped);
+          return deduped;
         });
-        return fetchedCards;
+      } finally {
+        inFlightRef.current = false;
+        setIsLoadingWords(false);
       }
-    } catch (clientErr) {
-      console.warn('Client fallback fetch error:', clientErr);
-    }
-    return [];
-  };
+    },
+    [cards]
+  );
 
-  // On initial mount, ensure we have cards
+  // Whenever the topic changes, show its cached words instantly and then make
+  // sure there is a live batch ready to scroll into.
   useEffect(() => {
-    if (cards.length === 0) {
-      setCards(DEFAULT_STARTER_CARDS);
+    if (loadedCategoryRef.current === selectedCategory) return;
+    loadedCategoryRef.current = selectedCategory;
+
+    const cached = getCachedCards(selectedCategory);
+    setCards(cached);
+
+    if (cached.length > 0) {
+      // Top up in the background so the feed never stalls.
+      void loadWords(selectedCategory, BATCH_SIZE, false);
+    } else {
+      void loadWords(selectedCategory, INITIAL_BATCH_SIZE, true);
     }
-  }, []);
+    // Intentionally keyed on the category only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory]);
+
+  /** Called by the feed when the learner approaches the end of the list. */
+  const handleNeedMore = useCallback(() => {
+    if (inFlightRef.current) return;
+    void loadWords(selectedCategory, BATCH_SIZE, false);
+  }, [loadWords, selectedCategory]);
+
+  const handleRetry = useCallback(() => {
+    void loadWords(selectedCategory, INITIAL_BATCH_SIZE, true);
+  }, [loadWords, selectedCategory]);
 
   // Toggle Save / Bookmark
   const handleToggleSave = (wordId: string) => {
-    setProgress(prev => {
+    setProgress((prev) => {
       const isSaved = prev.savedWordIds.includes(wordId);
-      const newSaved = isSaved
-        ? prev.savedWordIds.filter(id => id !== wordId)
-        : [...prev.savedWordIds, wordId];
       return {
         ...prev,
-        savedWordIds: newSaved,
+        savedWordIds: isSaved
+          ? prev.savedWordIds.filter((id) => id !== wordId)
+          : [...prev.savedWordIds, wordId],
       };
     });
   };
 
   // Toggle Learned / Mastered
   const handleToggleLearned = (wordId: string) => {
-    setProgress(prev => {
+    setProgress((prev) => {
       const isLearned = prev.learnedWordIds.includes(wordId);
-      const newLearned = isLearned
-        ? prev.learnedWordIds.filter(id => id !== wordId)
-        : [...prev.learnedWordIds, wordId];
-
-      const newTodayCount = !isLearned ? prev.todayLearnedCount + 1 : prev.todayLearnedCount;
-
       return {
         ...prev,
-        learnedWordIds: newLearned,
-        todayLearnedCount: newTodayCount,
+        learnedWordIds: isLearned
+          ? prev.learnedWordIds.filter((id) => id !== wordId)
+          : [...prev.learnedWordIds, wordId],
+        todayLearnedCount: isLearned
+          ? Math.max(0, prev.todayLearnedCount - 1)
+          : prev.todayLearnedCount + 1,
       };
     });
   };
 
   // Track word viewing
   const handleRecordWordViewed = (wordId: string) => {
-    setProgress(prev => {
+    setProgress((prev) => {
       if (prev.viewedWordIds.includes(wordId)) return prev;
-      return {
-        ...prev,
-        viewedWordIds: [...prev.viewedWordIds, wordId],
-      };
+      return { ...prev, viewedWordIds: [...prev.viewedWordIds, wordId] };
     });
   };
 
-  // Add newly fetched dynamic card from Dictionary API
-  const handleAddNewDynamicCard = (newCard: WordCard, prepend: boolean = true) => {
-    setCards(prev => {
-      const filtered = prev.filter(c => c.id.toLowerCase() !== newCard.id.toLowerCase());
-      const updated = prepend ? [newCard, ...filtered] : [...filtered, newCard];
-      // Save new card to local cached custom cards
-      saveCachedCustomCards(updated);
-      return updated;
-    });
-  };
-
-  // Update daily goal from stats tab
   const handleUpdateDailyGoal = (newGoal: number) => {
-    setProgress(prev => ({
-      ...prev,
-      dailyGoal: newGoal,
-    }));
+    setProgress((prev) => ({ ...prev, dailyGoal: newGoal }));
   };
 
-  // Reset progress confirmation
   const handleResetProgress = () => {
-    const fresh = getInitialProgress();
-    setProgress(fresh);
+    setProgress(getInitialProgress());
   };
 
-  // Jump from Saved tab directly to Feed
-  const handleOpenInFeed = (card: WordCard) => {
+  const handleOpenInFeed = () => {
     setSelectedCategory('all');
     setActiveTab('feed');
   };
 
-  const savedCards = cards.filter(c => progress.savedWordIds.includes(c.id));
+  const savedCards = cards.filter((c) => progress.savedWordIds.includes(c.id));
 
   return (
-    <div className="flex flex-col w-full h-[100dvh] bg-stone-950 text-stone-100 overflow-hidden font-sans">
-      {/* Main Content View Container */}
+    <div className="flex flex-col w-full h-[100dvh] bg-[#F8F7FF] text-[#1A1A2E] overflow-hidden font-sans">
       <main className="flex-1 w-full h-full relative overflow-hidden">
         {activeTab === 'feed' && (
           <FeedView
@@ -216,9 +185,10 @@ export default function App() {
             onToggleSave={handleToggleSave}
             onToggleLearned={handleToggleLearned}
             onRecordWordViewed={handleRecordWordViewed}
-            onAddNewDynamicCard={handleAddNewDynamicCard}
-            onFetchRealtime={fetchRealtimeBatch}
-            isFetchingRealtime={isFetchingRealtime}
+            onNeedMore={handleNeedMore}
+            isLoadingWords={isLoadingWords}
+            loadError={loadError}
+            onRetry={handleRetry}
           />
         )}
 
@@ -240,7 +210,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Bottom Navigation */}
       <BottomNavigation
         activeTab={activeTab}
         onSelectTab={setActiveTab}

@@ -1,26 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  ChevronUp, 
-  ChevronDown, 
-  Flame, 
-  Target, 
-  RotateCcw, 
-  Sparkles, 
-  Loader2, 
-  Filter, 
-  Volume2,
-  Shuffle,
-  Zap,
-  BookOpen,
-  Search
-} from 'lucide-react';
+import { Flame, Target, Loader2, RefreshCw } from 'lucide-react';
 import { WordCard, CategoryType, UserProgress } from '../types';
 import { CATEGORIES } from '../constants';
 import { WordCardView } from './WordCardView';
-import { DictionaryLookupModal } from './DictionaryLookupModal';
-import { lookupDictionaryWord } from '../utils/dictionaryApi';
-import { speakEnglish } from '../utils/speech';
 
 interface FeedViewProps {
   cards: WordCard[];
@@ -30,9 +12,11 @@ interface FeedViewProps {
   onToggleSave: (wordId: string) => void;
   onToggleLearned: (wordId: string) => void;
   onRecordWordViewed: (wordId: string) => void;
-  onAddNewDynamicCard: (card: WordCard) => void;
-  onFetchRealtime?: (category: string, count: number, prepend?: boolean) => Promise<WordCard[]>;
-  isFetchingRealtime?: boolean;
+  /** Called automatically when the learner nears the end of the feed. */
+  onNeedMore: () => void;
+  isLoadingWords: boolean;
+  loadError: string | null;
+  onRetry: () => void;
 }
 
 export const FeedView: React.FC<FeedViewProps> = ({
@@ -43,296 +27,109 @@ export const FeedView: React.FC<FeedViewProps> = ({
   onToggleSave,
   onToggleLearned,
   onRecordWordViewed,
-  onAddNewDynamicCard,
-  onFetchRealtime,
-  isFetchingRealtime = false,
+  onNeedMore,
+  isLoadingWords,
+  loadError,
+  onRetry,
 }) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [direction, setDirection] = useState(0); // 1 = down/next, -1 = up/prev
-  const [isLoadingNext, setIsLoadingNext] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [isDictionaryModalOpen, setIsDictionaryModalOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [showToast, setShowToast] = useState(false);
 
-  // Filter cards by category if selected
-  const filteredCards = selectedCategory === 'all'
-    ? cards
-    : cards.filter(c => c.category.toLowerCase() === selectedCategory.toLowerCase());
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const activeIndexRef = useRef(0);
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const touchStartY = useRef<number | null>(null);
-  const touchEndY = useRef<number | null>(null);
-  const isScrollingRef = useRef(false);
-  const lastFetchAttemptRef = useRef(0);
+  // Words always belong to the selected topic, so no client-side filtering is
+  // needed — the server only ever returns the requested category.
+  const visibleCards = cards;
 
-  // Record viewed word whenever index changes
+  const setIndex = useCallback((index: number) => {
+    activeIndexRef.current = index;
+    setActiveIndex(index);
+  }, []);
+
+  // Record the word the learner is currently looking at.
   useEffect(() => {
-    if (filteredCards[currentIndex]) {
-      onRecordWordViewed(filteredCards[currentIndex].id);
+    const card = visibleCards[activeIndex];
+    if (card) onRecordWordViewed(card.id);
+  }, [activeIndex, visibleCards, onRecordWordViewed]);
+
+  // Reset scroll to the top whenever the topic changes.
+  useEffect(() => {
+    setIndex(0);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [selectedCategory, setIndex]);
+
+  /**
+   * Automatic real-time fetching: when the learner scrolls within two cards
+   * of the end, the next batch is requested in the background. There is no
+   * fetch button — scrolling alone pulls the next words.
+   */
+  useEffect(() => {
+    if (visibleCards.length === 0) return;
+    if (activeIndex >= visibleCards.length - 2) {
+      onNeedMore();
     }
-  }, [currentIndex, filteredCards]);
+  }, [activeIndex, visibleCards.length, onNeedMore]);
 
-  // Reset index when category changes
+  // Floating "generating" toast while a batch is in flight.
   useEffect(() => {
-    setCurrentIndex(0);
-  }, [selectedCategory]);
-
-  // Primary Real-time AI Generation Handler (Instant Fresh Words via Gemini Flash)
-  const handleGenerateFreshRealtime = useCallback(async () => {
-    if (onFetchRealtime && !isFetchingRealtime) {
-      setIsLoadingNext(true);
-      setFetchError(null);
-      try {
-        const fresh = await onFetchRealtime(selectedCategory, 3, true);
-        if (fresh && fresh.length > 0) {
-          setDirection(-1);
-          setCurrentIndex(0);
-        }
-      } catch (err: any) {
-        console.warn('Realtime generate failed:', err);
-      } finally {
-        setIsLoadingNext(false);
-      }
+    if (!isLoadingWords) {
+      setShowToast(false);
       return;
     }
+    const timer = window.setTimeout(() => setShowToast(true), 700);
+    return () => window.clearTimeout(timer);
+  }, [isLoadingWords]);
 
-    // Fallback if onFetchRealtime not available
-    fetchNextApiWord();
-  }, [onFetchRealtime, selectedCategory, isFetchingRealtime]);
-
-  // Fetch dynamic word from API without relying on hardcoded word list
-  const fetchNextApiWord = useCallback(async () => {
-    setIsLoadingNext(true);
-    setFetchError(null);
-
-    if (onFetchRealtime && Date.now() - lastFetchAttemptRef.current > 3000) {
-      lastFetchAttemptRef.current = Date.now();
-      try {
-        const fresh = await onFetchRealtime(selectedCategory, 3, false);
-        if (fresh && fresh.length > 0) {
-          setDirection(1);
-          setCurrentIndex(prev => prev + 1);
-          return;
-        }
-      } catch (err) {
-        console.warn('Realtime batch failed, trying direct dictionary lookup');
-      }
+  // Insta-style scroll: derive the active card from the scroll position so
+  // swiping/scrolling alone moves between words — no Next button needed.
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || el.clientHeight === 0) return;
+    const index = Math.round(el.scrollTop / el.clientHeight);
+    const clamped = Math.max(0, Math.min(index, visibleCards.length - 1));
+    if (clamped !== activeIndexRef.current) {
+      setIndex(clamped);
     }
+  }, [visibleCards.length, setIndex]);
 
-    // Dynamic topic-driven vocabulary fallback
-    const dynamicTopics = [
-      'resilience', 'empathy', 'eloquent', 'mindfulness', 'tenacity',
-      'ephemeral', 'serendipity', 'benevolent', 'perseverance', 'pragmatic'
-    ];
-    const existingIds = new Set(cards.map(c => c.id.toLowerCase()));
-    const unselectedWord = dynamicTopics.find(w => !existingIds.has(w)) || 'compassion';
-
-    try {
-      const newCard = await lookupDictionaryWord(unselectedWord, selectedCategory);
-      if (newCard) {
-        onAddNewDynamicCard(newCard);
-        setDirection(1);
-        setCurrentIndex(prev => prev + 1);
-      }
-    } catch (err: any) {
-      console.warn('Dynamic fetch fallback:', err);
-    } finally {
-      setIsLoadingNext(false);
-    }
-  }, [cards, onAddNewDynamicCard, onFetchRealtime, selectedCategory]);
-
-  // Auto pre-fetch next real-time batch when near end
-  useEffect(() => {
-    const shouldFetch = filteredCards.length >= 3 && 
-      currentIndex >= filteredCards.length - 2 && 
-      onFetchRealtime && 
-      !isFetchingRealtime && 
-      !isLoadingNext &&
-      (Date.now() - lastFetchAttemptRef.current > 5000);
-
-    if (shouldFetch) {
-      lastFetchAttemptRef.current = Date.now();
-      onFetchRealtime(selectedCategory, 3, false);
-    }
-  }, [currentIndex, filteredCards.length, onFetchRealtime, isFetchingRealtime, isLoadingNext, selectedCategory]);
-
-  const handleNext = useCallback(() => {
-    if (isScrollingRef.current) return;
-    isScrollingRef.current = true;
-    setTimeout(() => { isScrollingRef.current = false; }, 350);
-
-    if (currentIndex < filteredCards.length - 1) {
-      setDirection(1);
-      setCurrentIndex(prev => prev + 1);
-    } else {
-      // Reached the end of current list, fetch new real-time words!
-      if (onFetchRealtime && !isFetchingRealtime) {
-        setIsLoadingNext(true);
-        onFetchRealtime(selectedCategory, 4, false).then(fresh => {
-          setIsLoadingNext(false);
-          if (fresh && fresh.length > 0) {
-            setDirection(1);
-            setCurrentIndex(prev => prev + 1);
-          }
-        }).catch(() => {
-          setIsLoadingNext(false);
-          fetchNextApiWord();
-        });
-      } else {
-        fetchNextApiWord();
-      }
-    }
-  }, [currentIndex, filteredCards.length, onFetchRealtime, isFetchingRealtime, selectedCategory, fetchNextApiWord]);
-
-  const handlePrev = useCallback(() => {
-    if (isScrollingRef.current) return;
-    isScrollingRef.current = true;
-    setTimeout(() => { isScrollingRef.current = false; }, 350);
-
-    if (currentIndex > 0) {
-      setDirection(-1);
-      setCurrentIndex(prev => prev - 1);
-    }
-  }, [currentIndex]);
-
-  // Touch Swipe Handlers for mobile reels gesture
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartY.current = e.touches[0].clientY;
-    touchEndY.current = null;
-  };
-
-  const onTouchMove = (e: React.TouchEvent) => {
-    touchEndY.current = e.touches[0].clientY;
-  };
-
-  const onTouchEnd = () => {
-    if (touchStartY.current === null || touchEndY.current === null) return;
-    const distance = touchStartY.current - touchEndY.current;
-    const minSwipeDistance = 45; // threshold in px
-
-    if (distance > minSwipeDistance) {
-      // Swiped Up -> Go to Next Word
-      handleNext();
-    } else if (distance < -minSwipeDistance) {
-      // Swiped Down -> Go to Previous Word
-      handlePrev();
-    }
-    touchStartY.current = null;
-    touchEndY.current = null;
-  };
-
-  // Mouse wheel scroll handler with debouncing
-  const handleWheel = (e: React.WheelEvent) => {
-    if (Math.abs(e.deltaY) < 30) return;
-    if (e.deltaY > 0) {
-      handleNext();
-    } else {
-      handlePrev();
-    }
-  };
-
-  // Keyboard navigation (ArrowUp, ArrowDown, Space, J, K)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (['input', 'textarea'].includes((document.activeElement?.tagName || '').toLowerCase())) {
-        return;
-      }
-      if (e.key === 'ArrowDown' || e.key === 'j' || e.key === ' ') {
-        e.preventDefault();
-        handleNext();
-      } else if (e.key === 'ArrowUp' || e.key === 'k') {
-        e.preventDefault();
-        handlePrev();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNext, handlePrev]);
-
-  const currentCard = filteredCards[currentIndex];
-
-  // Motion animation variants for the reel transition
-  const cardVariants = {
-    enter: (dir: number) => ({
-      y: dir > 0 ? '100%' : '-100%',
-      opacity: 0,
-      scale: 0.94,
-    }),
-    center: {
-      y: '0%',
-      opacity: 1,
-      scale: 1,
-      transition: {
-        y: { type: 'spring' as const, stiffness: 350, damping: 32 },
-        opacity: { duration: 0.25 },
-        scale: { duration: 0.25 },
-      },
-    },
-    exit: (dir: number) => ({
-      y: dir > 0 ? '-100%' : '100%',
-      opacity: 0,
-      scale: 0.94,
-      transition: {
-        y: { type: 'spring' as const, stiffness: 350, damping: 32 },
-        opacity: { duration: 0.2 },
-        scale: { duration: 0.2 },
-      },
-    }),
-  };
+  const goalPercent = Math.min(
+    100,
+    Math.round((progress.todayLearnedCount / Math.max(1, progress.dailyGoal)) * 100)
+  );
 
   return (
-    <div 
-      ref={containerRef}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onWheel={handleWheel}
-      className="relative w-full h-full flex flex-col overflow-hidden bg-stone-950"
-    >
-      {/* TOP BAR: Streak, Daily Goal, and Category Filter Bar */}
-      <div className="z-30 w-full bg-stone-950/80 backdrop-blur-md border-b border-stone-800/80 px-4 pt-3 pb-2.5">
+    <div className="reels-shell flex flex-col w-full h-[100dvh] max-h-[100dvh] overflow-hidden">
+      {/* ---- Header: streak, daily goal, topic chips (fixed, feed slides under) ---- */}
+      <header className="shrink-0 relative z-20 px-4 pt-3 pb-1 bg-[#F8F7FF]/95 backdrop-blur">
         <div className="max-w-md mx-auto flex items-center justify-between gap-3 mb-2">
-          {/* Daily Streak Indicator */}
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold">
-            <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-bounce" />
-            <span>{progress.streak} Day Streak</span>
+          {/* Streak badge — gradient accent */}
+          <div
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-white text-xs font-bold shadow-md shadow-[#EC4899]/25"
+            style={{ backgroundImage: 'linear-gradient(135deg, #3B82F6 0%, #EC4899 100%)' }}
+          >
+            <Flame className="w-4 h-4" strokeWidth={2} fill="currentColor" />
+            <span>{progress.streak} day streak</span>
           </div>
 
-          {/* Daily Goal Counter */}
-          <div className="flex items-center gap-1.5 text-xs text-stone-300 bg-stone-900 px-3 py-1 rounded-full border border-stone-800">
-            <Target className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Today: <strong className="text-white">{progress.todayLearnedCount}</strong>/{progress.dailyGoal}</span>
-          </div>
-
-          {/* Dynamic Real-time AI Word Fetch Button */}
-          <div className="flex items-center gap-1.5">
-            <button
-              id="btn-open-dictionary-lookup"
-              onClick={() => setIsDictionaryModalOpen(true)}
-              title="Search any word via Free Dictionary API"
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-stone-900 hover:bg-stone-850 text-stone-200 border border-stone-700/80 transition-all shadow-sm active:scale-95"
-            >
-              <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-              <span className="font-medium">Dict API</span>
-            </button>
-
-            <button
-              id="btn-shuffle-dynamic-word"
-              onClick={handleGenerateFreshRealtime}
-              disabled={isLoadingNext || isFetchingRealtime}
-              title="Generate completely new, unrepeated words in real-time with Gemini AI"
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500/20 to-purple-500/20 hover:from-amber-500/30 hover:to-purple-500/30 text-amber-200 border border-amber-500/40 transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            >
-              {isLoadingNext || isFetchingRealtime ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-              ) : (
-                <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
-              )}
-              <span className="font-medium">Real-time</span>
-            </button>
+          {/* Daily goal with gradient progress bar */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-[#ECE9F6] min-w-[132px]">
+            <Target className="w-3.5 h-3.5 text-[#EC4899]" strokeWidth={2} />
+            <div className="flex-1">
+              <div className="h-1.5 rounded-full bg-[#F1EEFA] overflow-hidden">
+                <div
+                  className="h-full brand-gradient rounded-full transition-all duration-500"
+                  style={{ width: `${goalPercent}%` }}
+                />
+              </div>
+            </div>
+            <span className="text-[11px] font-bold text-[#1A1A2E] tabular-nums">
+              {progress.todayLearnedCount}/{progress.dailyGoal}
+            </span>
           </div>
         </div>
 
-        {/* Categories Horizontal Scroll Pills */}
+        {/* Topic chips */}
         <div className="max-w-md mx-auto flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
           {CATEGORIES.map((cat) => {
             const isSelected = selectedCategory === cat.id;
@@ -341,10 +138,10 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 key={cat.id}
                 id={`filter-cat-${cat.id}`}
                 onClick={() => onSelectCategory(cat.id)}
-                className={`whitespace-nowrap px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 flex-shrink-0 ${
+                className={`whitespace-nowrap px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 flex-shrink-0 active:scale-95 ${
                   isSelected
-                    ? 'bg-amber-400 text-stone-950 font-bold shadow-md shadow-amber-400/20'
-                    : 'bg-stone-900/90 text-stone-400 hover:text-stone-200 hover:bg-stone-800 border border-stone-800'
+                    ? 'brand-gradient text-white shadow-md shadow-[#EC4899]/25'
+                    : 'bg-white text-[#6B7280] border border-[#ECE9F6] hover:text-[#2563EB]'
                 }`}
               >
                 {cat.labelEn}
@@ -352,85 +149,83 @@ export const FeedView: React.FC<FeedViewProps> = ({
             );
           })}
         </div>
-      </div>
+      </header>
 
-      {/* REEL CONTAINER: One full card per screen with vertical animated transition */}
-      <div className="relative flex-1 w-full h-full overflow-hidden flex items-center justify-center">
-        <AnimatePresence initial={false} custom={direction} mode="wait">
-          {currentCard ? (
-            <motion.div
-              key={currentCard.id}
-              custom={direction}
-              variants={cardVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              className="absolute inset-0 w-full h-full"
+      {/* ---- Reels stage: swipe vertically, one word per full screen ---- */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="feed-scroll no-scrollbar relative w-full min-h-0 flex-1"
+      >
+        {visibleCards.length > 0 ? (
+          visibleCards.map((card, index) => (
+            <section
+              key={card.id}
+              data-index={index}
+              className="feed-page w-full flex flex-col items-center justify-center px-0"
             >
               <WordCardView
-                card={currentCard}
-                isSaved={progress.savedWordIds.includes(currentCard.id)}
-                isLearned={progress.learnedWordIds.includes(currentCard.id)}
+                card={card}
+                isSaved={progress.savedWordIds.includes(card.id)}
+                isLearned={progress.learnedWordIds.includes(card.id)}
                 onToggleSave={onToggleSave}
                 onToggleLearned={onToggleLearned}
-                onNext={handleNext}
               />
-            </motion.div>
+            </section>
+          ))
+        ) : loadError ? (
+            <div className="feed-page w-full flex flex-col items-center justify-center text-center p-8 gap-4">
+              <div className="w-16 h-16 rounded-full brand-gradient-soft flex items-center justify-center">
+                <RefreshCw className="w-7 h-7 text-[#EC4899]" strokeWidth={1.75} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-[#1A1A2E]">Couldn&apos;t load words</h3>
+                <p className="text-sm text-[#6B7280] mt-1 max-w-xs">{loadError}</p>
+              </div>
+              <button
+                onClick={onRetry}
+                className="brand-gradient px-6 py-2.5 rounded-full text-white text-sm font-semibold shadow-lg shadow-[#EC4899]/25 active:scale-95 transition-transform"
+              >
+                Try again
+              </button>
+            </div>
           ) : (
-            <div className="flex flex-col items-center justify-center text-center p-6 gap-3">
-              <Loader2 className="w-8 h-8 animate-spin text-amber-400" />
-              <p className="text-stone-300 font-medium">Fetching vocabulary definitions...</p>
+            <div className="feed-page w-full flex flex-col items-center justify-center text-center p-8 gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-[#EC4899]" strokeWidth={1.75} />
+              <p className="text-sm font-medium text-[#6B7280]">
+                Finding hard words in real time…
+              </p>
             </div>
           )}
-        </AnimatePresence>
 
-        {/* Desktop Side Navigation Buttons (Up & Down Chevrons) */}
-        <div className="hidden md:flex absolute right-6 top-1/2 -translate-y-1/2 flex-col gap-3 z-30">
-          <button
-            id="btn-desktop-prev"
-            onClick={handlePrev}
-            disabled={currentIndex === 0}
-            className="p-3 rounded-full bg-stone-900/80 hover:bg-stone-800 text-stone-300 hover:text-white border border-stone-700/80 backdrop-blur-md shadow-lg disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-            title="Previous Word (Up Arrow)"
-          >
-            <ChevronUp className="w-6 h-6" />
-          </button>
-          <button
-            id="btn-desktop-next"
-            onClick={handleNext}
-            className="p-3 rounded-full bg-stone-900/80 hover:bg-stone-800 text-stone-300 hover:text-white border border-stone-700/80 backdrop-blur-md shadow-lg transition-all"
-            title="Next Word (Down Arrow)"
-          >
-            <ChevronDown className="w-6 h-6" />
-          </button>
-        </div>
+          {/* Inline loader page pinned after the last word while fetching more */}
+          {visibleCards.length > 0 && isLoadingWords && (
+            <div className="feed-page w-full flex items-center justify-center gap-2">
+              <Loader2 className="w-6 h-6 animate-spin text-[#EC4899]" strokeWidth={2} />
+              <span className="text-xs font-semibold text-[#6B7280]">
+                Fetching more real-time words…
+              </span>
+            </div>
+          )}
       </div>
 
-      {/* Floating toast message if fetch is in progress */}
-      {(isLoadingNext || isFetchingRealtime) && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 px-4 py-1.5 rounded-full text-xs font-bold shadow-xl flex items-center gap-2 animate-pulse">
-          <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-950" />
-          <span>⚡ Generating fresh real-time daily words & Tamil examples...</span>
+      {/* ---- Floating page indicator (does not steal feed height) ---- */}
+      {visibleCards.length > 0 && (
+        <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-20 z-30 flex items-center justify-center">
+          <span className="text-[11px] font-medium text-[#6B7280] bg-white/85 backdrop-blur px-3 py-1 rounded-full border border-[#ECE9F6] shadow-sm">
+            Word <strong className="text-[#1A1A2E]">{activeIndex + 1}</strong> of{' '}
+            {visibleCards.length}
+          </span>
         </div>
       )}
 
-      {/* Card Index & Progress indicator dots */}
-      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full bg-stone-900/70 backdrop-blur-md border border-stone-800 text-[11px] text-stone-400">
-        <span>Word <strong>{currentIndex + 1}</strong> of {filteredCards.length}</span>
-      </div>
-
-      {/* Free Dictionary API Real-time Lookup Modal */}
-      <DictionaryLookupModal
-        isOpen={isDictionaryModalOpen}
-        onClose={() => setIsDictionaryModalOpen(false)}
-        onAddWordToFeed={(newCard, jumpToIt) => {
-          onAddNewDynamicCard(newCard);
-          if (jumpToIt) {
-            setDirection(-1);
-            setCurrentIndex(0);
-          }
-        }}
-      />
+      {/* Loading toast */}
+      {showToast && isLoadingWords && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-40 brand-gradient text-white px-4 py-2 rounded-full text-xs font-semibold shadow-xl shadow-[#EC4899]/30 flex items-center gap-2 animate-float-up">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
+          <span>Fetching more real-time words…</span>
+        </div>
+      )}
     </div>
   );
 };

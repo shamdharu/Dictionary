@@ -21,7 +21,11 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Tamil-English Vocabulary Scroll server running on http://0.0.0.0:${PORT}`);
+    // Bound to 0.0.0.0 so containers/LAN clients can reach it, but 0.0.0.0 is not
+    // a routable address in a browser (it triggers ERR_ADDRESS_INVALID).
+    // Always log the loopback URL the user should actually open.
+    console.log(`Tamil-English Vocabulary Scroll server running on http://localhost:${PORT}`);
+    console.log(`(bound to all interfaces on port ${PORT} — open http://localhost:${PORT} in your browser)`);
   });
 }
 
