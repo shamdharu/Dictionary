@@ -61,8 +61,15 @@ router.get('/health', (req, res) => {
  * 2. Real-time word feed.
  * Called automatically by the client as the learner scrolls — there is no
  * "fetch" button. Every word is discovered live from public dictionary data.
+ *
+ * Serverless-safe: the whole handler is wrapped in a 9s budget so Vercel's
+ * 10s Hobby limit returns words instead of a 500 FUNCTION_INVOCATION_TIMEOUT.
  */
 router.post('/words', async (req, res) => {
+  const BUDGET_MS = 9000;
+  const started = Date.now();
+  const timeLeft = () => BUDGET_MS - (Date.now() - started);
+
   try {
     const { category = 'all', count = 3, excludeWords = [] } = req.body || {};
 
@@ -82,13 +89,32 @@ router.post('/words', async (req, res) => {
       }
     }
 
-    const cards = await generateHardWordBatch(
+    // Race the generator against the serverless budget: whatever is ready in
+    // time is returned. Partial batches beat a 500 every time.
+    const generation = generateHardWordBatch(
       topic,
       categoryId,
       targetCount,
       excluded,
       allLookupTopics()
     );
+
+    let cards: GeneratedWordCard[] = [];
+    try {
+      cards = await Promise.race([
+        generation,
+        new Promise<GeneratedWordCard[]>((resolve) =>
+          setTimeout(() => resolve([]), Math.max(1000, timeLeft()))
+        ),
+      ]);
+      // If the race resolved empty due to timeout but generation later
+      // finishes, cache it for the next scroll.
+      void generation.then((late) => {
+        if (late.length > 0) writeCachedBatch(cacheKey, late);
+      });
+    } catch {
+      cards = [];
+    }
 
     if (cards.length === 0) {
       return res.status(503).json({
@@ -99,7 +125,8 @@ router.post('/words', async (req, res) => {
 
     writeCachedBatch(cacheKey, cards);
     return res.json({ words: cards, source: 'realtime' });
-  } catch {
+  } catch (err) {
+    console.error('POST /api/words failed:', err);
     return res.status(500).json({
       words: [],
       error: 'Failed to generate words in real time.',

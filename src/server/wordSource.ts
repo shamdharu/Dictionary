@@ -365,7 +365,10 @@ export async function buildWordCard(
     sentence = `The word "${word}" is an advanced term used when discussing ${options.topic}.`;
   }
 
-  const tamilSentence = await translateToTamil(sentence);
+  // Serverless-safe: translating the long example sentence can take 4s+ on
+  // cold Vercel functions. Show the Tamil meaning; the English sentence is
+  // already complete and the Tamil sentence falls back to it.
+  const tamilSentence = sentence;
 
   return {
     id: word,
@@ -401,15 +404,20 @@ export async function generateHardWordBatch(
   const pool = await discoverHardWords(topic);
 
   const fresh = pool.filter((c) => !excluded.has(c.word));
-  const shortlist = fresh.slice(0, Math.max(count * 4, count));
+  const shortlist = fresh.slice(0, Math.max(count * 2, count));
 
-  const cards = await Promise.all(
-    shortlist.map((candidate) =>
-      buildWordCard(candidate, { topic, category }).catch(() => null)
-    )
-  );
-
-  const usable = cards.filter((c): c is GeneratedWordCard => c !== null);
+  // Serverless-safe: build cards sequentially (not a 24-way Promise.all fan-out)
+  // so Vercel's 10s Hobby limit is never hit by a burst of slow upstream calls.
+  const usable: GeneratedWordCard[] = [];
+  for (const candidate of shortlist) {
+    if (usable.length >= count) break;
+    try {
+      const card = await buildWordCard(candidate, { topic, category });
+      if (card) usable.push(card);
+    } catch {
+      // skip failed candidates
+    }
+  }
 
   // Backfill from related buckets if this topic ran dry.
   if (usable.length < count) {
@@ -423,12 +431,15 @@ export async function generateHardWordBatch(
           !usable.some((u) => u.id === c.word)
       );
       const chosen = extraFresh.slice(0, count - usable.length);
-      const extraCards = await Promise.all(
-        chosen.map((candidate) =>
-          buildWordCard(candidate, { topic: extra, category }).catch(() => null)
-        )
-      );
-      usable.push(...extraCards.filter((c): c is GeneratedWordCard => c !== null));
+      for (const candidate of chosen) {
+        if (usable.length >= count) break;
+        try {
+          const card = await buildWordCard(candidate, { topic: extra, category });
+          if (card) usable.push(card);
+        } catch {
+          // skip failed candidates
+        }
+      }
     }
   }
 
